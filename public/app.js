@@ -160,7 +160,7 @@ function route() {
   const [a, b, c] = parts;
   curNav = { "": "", games: "games", aways: "games", f: "games", clubs: "", lost: "", pubs: "pubs", g: "pubs", inbox: "inbox", dm: "inbox", me: "me", u: "", lounge: "", admin: "me", rules: "me", photos: "photos", notes: "", p: "feed", feed: "feed", league: "" }[a] ?? "";
   window.scrollTo(0, 0);
-  if (!ME && a !== "rules") { NAV.hidden = true; return drawJoin(); }
+  if (!ME && a !== "rules" && a !== "admin") { NAV.hidden = true; return drawJoin(); }
   NAV.hidden = false;
   nav(curNav);
   const R = { "": pHub, feed: pHome, league: pLeague, games: pAways, aways: pAways, clubs: pClubs, lost: pLost, f: pFixture, pubs: pPubs, g: pGround, inbox: pInbox, dm: pDM, me: pMe, u: pUser, lounge: pLounge, rules: pRules, admin: pAdmin, photos: pGallery, notes: pNotes, p: pPost };
