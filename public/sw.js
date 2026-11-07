@@ -1,5 +1,5 @@
 // ALAW offline shell. Pages and data always come fresh when there's signal; photos are cached once seen.
-const V = "alaw-v9";
+const V = "alaw-v10";
 const SHELL = ["/", "/app.js", "/manifest.webmanifest", "/icon-192.png", "/vendor/leaflet.js", "/vendor/leaflet.css"];
 self.addEventListener("install", (e) => { e.waitUntil(caches.open(V).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener("activate", (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== V).map((k) => caches.delete(k)))).then(() => self.clients.claim())); });

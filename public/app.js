@@ -43,6 +43,17 @@ function skeleton(home) {
   return `${home ? topbar() : ""}<div class="col" style="gap:16px" aria-busy="true" aria-label="Loading"><div class="sk" style="height:200px"></div><div class="tiles">${'<div class="sk" style="height:104px"></div>'.repeat(6)}</div><div class="sk" style="height:120px"></div><div class="sk" style="height:90px"></div></div>`;
 }
 
+/* ---------- accounts this phone remembers ---------- */
+const known = () => (LSJ.get("alawKnown") || []).filter((k) => k && k.code && k.nick);
+function remember(nick, code) { LSJ.set("alawKnown", [{ nick, code }, ...known().filter((k) => k.code !== code && k.nick !== nick)].slice(0, 4)); }
+function forget(code) { LSJ.set("alawKnown", known().filter((k) => k.code !== code)); }
+function goIn() { if (/^#\/(me|admin)?$/.test(location.hash) && location.hash !== "#/") location.hash = "#/"; else route(); }
+async function signIn(code) {
+  const old = AUTH; AUTH = code;
+  try { const j = await api("/me"); LS.set("alawAuth", code); remember(j.me.nick, code); await refreshBoot(); checkInbox(); return j.me; }
+  catch (e) { AUTH = old; throw e; }
+}
+
 /* ---------- small bits ---------- */
 function toast(t) { const d = document.createElement("div"); d.className = "toast"; d.setAttribute("role", "status"); d.textContent = t; document.body.appendChild(d); setTimeout(() => d.remove(), 2600); }
 const TZ = { timeZone: "Europe/London" };
@@ -109,11 +120,7 @@ function topbar() {
 function backBtn(href, label = "Back") { return `<a href="${href}" class="ibtn" aria-label="${esc(label)}">${ic("back")}</a>`; }
 const needJoin = () => {
   if (ME) return false;
-  sheet(`<h2 class="h2" style="font-size:24px">Pick a nickname</h2>
-    <p class="note">That's all ALAW needs. No email, no password.</p>
-    <form data-form="quickjoin" class="col"><div><label class="l" for="qjn">Nickname</label><input class="f" id="qjn" name="nick" minlength="3" maxlength="20" autocomplete="nickname" placeholder="e.g. TomLUFC" required></div>
-    <label class="check"><input type="checkbox" name="rules" required> I'm 18 or over and I'll stick to the <a href="#/rules">house rules</a>.</label>
-    <button class="btn y big">Let's go</button><button type="button" class="btn" data-act="close-sheet">Not now</button></form>`);
+  closeSheet(); NAV.hidden = true; drawJoin(); window.scrollTo(0, 0);
   return true;
 };
 
@@ -133,7 +140,7 @@ async function boot() {
   const saved = LSJ.get("alawBoot");
   if (saved && saved.fixtures) { BOOT = saved; ME = AUTH ? saved.me : null; route(); }
   else APP.innerHTML = skeleton(true);
-  try { BOOT = await api("/boot"); ME = BOOT.me; LSJ.set("alawBoot", BOOT); if (AUTH && !ME) { AUTH = null; LS.set("alawAuth", null); route(); } }
+  try { BOOT = await api("/boot"); ME = BOOT.me; LSJ.set("alawBoot", BOOT); if (AUTH && ME) remember(ME.nick, AUTH); if (AUTH && !ME) { forget(AUTH); AUTH = null; LS.set("alawAuth", null); route(); } }
   catch (e) { if (!saved) APP.innerHTML = `<div class="empty">Couldn't reach ALAW. ${esc(e.message)}<br><br><button class="btn y" onclick="location.reload()">Try again</button></div>`; return; }
   if (saved) { checkInbox(); setInterval(checkInbox, 60e3); nav(curNav); return; }
   if (AUTH && !ME) { /* key no longer valid */ }
@@ -835,6 +842,7 @@ async function pMe() {
   ME = j.me;
   APP.innerHTML = profileHtml(j.me, j.stats, true);
 }
+let LANDMODE = "join";
 function drawJoin() {
   const nx = (BOOT.fixtures || []).find((f) => f.ts > NOW() - 3 * H);
   const feats = [["car", "Lifts", "Need a lift or got a spare seat"], ["ticket", "Spare tickets", "Find one, pass one on, the official way"], ["pint", "Pubs", "Where the Leeds are drinking right now"], ["pin", "Meet-ups", "Find your lot, drop a pin, walk there"], ["medal", "Predictions", "Call the score, top the league"], ["cam", "Photos & banter", "The away end, the pub, the train"]];
@@ -846,14 +854,23 @@ function drawJoin() {
       ${nx ? `<div class="board row" style="gap:10px;border-radius:14px">${ic("cal", 18, 'style="color:var(--yellow)"')}<span class="grow">Next: ${nx.isAway ? "at " + esc(short(nx.home.name)) : "v " + esc(short(nx.away.name))} · ${fmtDay(nx.ts)}</span>${(nx.going || 0) + (nx.watching || 0) ? `<span class="y" style="font-weight:700">${(nx.going || 0) + (nx.watching || 0)} in</span>` : ""}</div>` : ""}
     </section>
     <div class="feats">${feats.map(([i, t, d]) => `<div class="feat">${ic(i, 22, 'style="color:var(--yellow);flex-shrink:0"')}<div><b>${t}</b><span class="tiny muted">${d}</span></div></div>`).join("")}</div>
-    <form data-form="join" class="card col" style="gap:12px">
-      <h2 class="h2" style="font-size:24px">Get in</h2>
-      <div><label class="l" for="jn">Pick a nickname</label><input class="f" id="jn" name="nick" minlength="3" maxlength="20" autocomplete="nickname" placeholder="e.g. TomLUFC" required></div>
+    ${known().length ? `<section class="card col" style="gap:10px;border-color:var(--yellow)"><h2 class="h2" style="font-size:22px">On this phone</h2>${known().map((k) => `<button class="btn y big block" data-act="resume" data-code="${esc(k.code)}">${av(k.nick)}Continue as ${esc(k.nick)}</button>`).join("")}</section>` : ""}
+    <div class="pill" role="tablist" aria-label="Join or log in"><button role="tab" aria-selected="${LANDMODE === "join"}" class="${LANDMODE === "join" ? "on" : ""}" data-act="landmode" data-k="join">New here</button><button role="tab" aria-selected="${LANDMODE === "login"}" class="${LANDMODE === "login" ? "on" : ""}" data-act="landmode" data-k="login">Log in</button></div>
+    ${LANDMODE === "join" ? `<form data-form="join" class="card col" style="gap:12px" novalidate>
+      <h2 class="h2" style="font-size:24px">Join ALAW</h2>
+      <div><label class="l" for="jn">Pick a nickname</label><input class="f" id="jn" name="nick" minlength="3" maxlength="20" autocomplete="username" placeholder="e.g. TomLUFC" required></div>
+      <div><label class="l" for="jp">Choose a password (6+ characters)</label><input class="f" id="jp" name="password" type="password" minlength="6" maxlength="100" autocomplete="new-password" required></div>
       <label class="check"><input type="checkbox" name="rules"> I'm 18 or over and I'll stick to the <a href="#/rules">house rules</a>.</label>
       <button class="btn y big">Join ALAW · free</button>
-      <span class="tiny muted">No email, no phone number, no password. ${BOOT.fans ? `${BOOT.fans} Leeds fan${BOOT.fans === 1 ? "" : "s"} already in.` : ""}</span>
-    </form>
-    <details class="card"><summary style="cursor:pointer;font-weight:600;min-height:28px">Already joined on another phone?</summary>
+      <span class="tiny muted">No email or phone number needed. ${BOOT.fans ? `${BOOT.fans} Leeds fan${BOOT.fans === 1 ? "" : "s"} already in.` : ""}</span>
+    </form>` : `<form data-form="login" class="card col" style="gap:12px" novalidate>
+      <h2 class="h2" style="font-size:24px">Welcome back</h2>
+      <div><label class="l" for="ln">Nickname</label><input class="f" id="ln" name="nick" maxlength="20" autocomplete="username" required></div>
+      <div><label class="l" for="lp">Password</label><input class="f" id="lp" name="password" type="password" maxlength="100" autocomplete="current-password" required></div>
+      <button class="btn y big">Log in</button>
+      <span class="tiny muted">Forgotten it? Message ALAW on Facebook and we'll reset it for you.</span>
+    </form>`}
+    <details class="card" hidden><summary>Recovery code</summary>
       <form data-form="login" class="col" style="margin-top:12px"><label class="l" for="rc">Paste your recovery code (from Me on your other phone)</label><input class="f" id="rc" name="code" autocomplete="off" required><button class="btn y">Log in</button></form>
     </details>
     <p class="note" style="text-align:center">An independent fan site, not connected to Leeds United FC.</p>
@@ -864,7 +881,7 @@ function profileHtml(u, s, own) {
     ${own ? "" : backBtn("javascript:history.back()")}
     <div class="row" style="gap:14px">${av(u.nick, "lg")}<div class="grow"><div class="h1" style="font-size:32px">${esc(u.nick)}</div><div class="small soft">${u.from ? "Travels from " + esc(u.from) + " · " : ""}On ALAW since ${dm(u.since)}</div></div></div>
     ${u.bio ? `<p style="margin:0;line-height:1.5" class="soft">${esc(u.bio)}</p>` : ""}
-    ${own && LS.get("alawSaveCode") ? `<div class="rule">Save your recovery code (further down) so you can never lose this account.</div>` : ""}
+    ${own && !u.hasPw ? `<a href="#pwbox" class="rule" style="display:block">Set a password (further down) so you can log in on any phone.</a>` : ""}
     <div class="stats"><div class="stat"><b class="y">${s.games}</b><span>games</span></div><div class="stat"><b>${s.aways}</b><span>away days</span></div><div class="stat"><b>${s.grounds}</b><span>away grounds</span></div></div>
     ${own ? "" : `<div class="row"><a class="btn y grow" href="#/dm/${esc(u.id)}">Message</a><button class="btn" data-act="opt" data-type="user" data-id="${esc(u.id)}" data-uid="${esc(u.id)}">More</button></div>`}
     <section class="col"><h2 class="h2">Badges</h2><div class="badges">${s.badges.map((b) => `<div class="badge ${b.got ? "" : "off"}">${ic(b.got ? "medal" : "lock", 26, `style="color:${b.got ? "var(--yellow)" : "var(--muted)"};flex-shrink:0"`)}<div><b>${esc(b.name)}</b><span class="tiny muted">${esc(b.desc)}</span></div></div>`).join("")}</div></section>
@@ -874,8 +891,10 @@ function profileHtml(u, s, own) {
       <form data-form="profile" class="col"><div><label class="l" for="pf">Travels from</label><input class="f" id="pf" name="from" maxlength="30" value="${esc(u.from)}"></div>
       <div><label class="l" for="pb">About you</label><textarea class="f" id="pb" name="bio" maxlength="160" placeholder="Away since '98. Never missed a Tuesday night.">${esc(u.bio)}</textarea></div><button class="btn y">Save</button></form>
     </section>
-    <section class="card col"><h2 class="h2" style="font-size:20px">Your recovery code</h2><p class="note">This is your login. Save it somewhere safe (notes app or a screenshot) to log in on another phone. Never share it with anyone.</p>
-      <button class="btn" data-act="showcode">Show my code</button><div id="codebox"></div></section>
+    <section class="card col" id="pwbox"><h2 class="h2" style="font-size:20px">${u.hasPw ? "Change password" : "Set a password"}</h2>
+      ${u.hasPw ? "" : `<p class="note">Set one so you can log in with your nickname on any phone.</p>`}
+      <form data-form="setpw" class="col" novalidate>${u.hasPw ? `<div><label class="l" for="pc">Current password</label><input class="f" id="pc" name="current" type="password" autocomplete="current-password" required></div>` : ""}
+      <div><label class="l" for="pn2">New password (6+ characters)</label><input class="f" id="pn2" name="password" type="password" minlength="6" autocomplete="new-password" required></div><button class="btn y">Save password</button></form></section>
     ${(u.blockedList || []).length ? `<section class="col"><h2 class="h2" style="font-size:20px">Blocked</h2><div class="chips">${u.blockedList.map((b) => `<button class="chip" style="min-height:40px" data-act="unblock" data-uid="${esc(b.id)}">Unblock ${esc(b.nick)}</button>`).join("")}</div></section>` : ""}
     <div class="row" style="flex-wrap:wrap"><a class="btn" href="#/rules">House rules</a><button class="btn" data-act="logout">Log out</button>${ADMIN ? '<a class="btn" href="#/admin">Admin</a>' : ""}</div>` : ""}
   </div>`;
@@ -1017,6 +1036,8 @@ async function pAdmin() {
       <div><label class="l" for="po">Options (one per line, 2 to 6)</label><textarea class="f" id="po" name="options" required></textarea></div><button class="btn y">Start poll</button></form>
       ${(j.polls || []).map((pl) => `<div class="row small"><span class="grow">${esc(pl.q)} · ${pl.total} votes${pl.closed ? " · closed" : ""}</span>${pl.closed ? "" : `<button class="btn" data-act="admclosepoll" data-id="${esc(pl.id)}">Close</button>`}</div>`).join("")}
     </section>
+    <section class="card col"><h2 class="h2" style="font-size:20px">Reset a fan's password</h2>
+      <form data-form="admresetpw" class="row" style="gap:8px"><label class="sr" for="rpn">Nickname</label><input class="f grow" id="rpn" name="nick" placeholder="Their nickname" required><button class="btn y">Reset</button></form></section>
     <section class="card col" style="border-color:var(--bad)"><h2 class="h2" style="font-size:20px;color:var(--bad)">Start fresh</h2>
       <p class="note">Deletes every account, post, photo, comment, lift, ticket, meet-up, check-in, prediction, rating, poll and message. Fixtures and pub lists stay. This can't be undone, and you'll need to join again yourself.</p>
       <form data-form="admwipe" class="col"><label class="l" for="wipeC">Type DELETE to confirm</label><input class="f" id="wipeC" name="confirm" autocomplete="off" required><button class="btn" style="border-color:var(--bad);color:var(--bad)">Wipe everything and start fresh</button></form>
@@ -1253,9 +1274,15 @@ const ACT = {
   showcode() { LS.set("alawSaveCode", null); $("#codebox").innerHTML = `<div class="code" id="code">${esc(AUTH)}</div><button class="btn" data-act="copycode">Copy code</button>`; },
   async copycode() { try { await navigator.clipboard.writeText(AUTH); toast("Copied. Keep it somewhere safe."); } catch (e) { toast("Press and hold the code to copy it."); } },
   logout() {
-    sheet(`<h2 class="h2" style="font-size:20px">Log out?</h2><p class="note">Make sure you've saved your recovery code first, or you won't be able to get back into this account.</p><button class="btn y" data-act="logoutyes">Log out</button><button class="btn" data-act="close-sheet">Cancel</button>`);
+    sheet(`<h2 class="h2" style="font-size:22px">Log out?</h2><p class="note">Log back in any time with your nickname and password. This phone will also remember you, so you can just tap "Continue as ${esc(ME ? ME.nick : "")}".</p>
+      <button class="btn y" data-act="logoutyes">Log out</button><button class="btn" data-act="close-sheet">Stay logged in</button>`);
   },
-  async logoutyes() { AUTH = null; LS.set("alawAuth", null); LS.set("alawHub", null); ME = null; FCACHE.clear(); PC.clear(); closeSheet(); await refreshBoot(); route(); },
+  landmode(d) { LANDMODE = d.k; drawJoin(); },
+  async resume(d) {
+    try { const me = await signIn(d.code); toast(`Welcome back, ${me.nick}.`); goIn(); }
+    catch (e) { forget(d.code); toast("That account doesn't exist any more. Join again below."); route(); }
+  },
+  async logoutyes() { LANDMODE = "login"; AUTH = null; LS.set("alawAuth", null); LS.set("alawHub", null); ME = null; FCACHE.clear(); PC.clear(); closeSheet(); await refreshBoot(); route(); },
   async adm(d) { await api("/admin/act", { type: d.type, id: d.id, action: d.a, uid: d.uid }); toast("Done."); pAdmin(); },
   async admrefresh() { const j = await api("/admin/refresh", {}); toast(j.fixtures.error || `${j.fixtures.count} fixtures`); await refreshBoot(); pAdmin(); },
   async admrmfix(d) { await api("/admin/fixture", { remove: d.id }); await refreshBoot(); pAdmin(); },
@@ -1291,9 +1318,14 @@ function getPos() {
   return new Promise((ok, no) => navigator.geolocation.getCurrentPosition((p) => ok({ lat: +p.coords.latitude.toFixed(5), lng: +p.coords.longitude.toFixed(5) }), (e) => no(new Error(e.code === 1 ? "Location is blocked. Allow it in your browser settings to drop a pin." : "Couldn't find your location. Try again outside.")), { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }));
 }
 const FORM = {
+  async setpw(v) {
+    if (String(v.password || "").length < 6) throw new Error("New password needs at least 6 characters.");
+    await api("/me/password", { current: v.current, password: v.password }); toast("Password saved. Use it to log in on any phone."); pMe();
+  },
+  async admresetpw(v) { const j = await api("/admin/resetpw", { nick: v.nick }); sheet(`<h2 class="h2" style="font-size:22px">New password for ${esc(j.nick)}</h2><p class="note">Send them this. They can change it on their Me page.</p><div class="code">${esc(j.temp)}</div><button class="btn" data-act="close-sheet">Done</button>`); },
   async quickjoin(v) {
     const j = await api("/me/create", { nick: v.nick, rules: !!v.rules });
-    AUTH = `${j.id}.${j.key}`; LS.set("alawAuth", AUTH); LS.set("alawSaveCode", "1");
+    AUTH = `${j.id}.${j.key}`; LS.set("alawAuth", AUTH); LS.set("alawSaveCode", "1"); remember(j.nick, AUTH);
     await refreshBoot(); closeSheet(); toast(`Welcome, ${j.nick}. Marching on together.`); reload();
   },
   async quicklift(v) {
@@ -1348,16 +1380,18 @@ const FORM = {
   async admground(v) { const j = await api("/admin/ground", v); toast(`Saved. Found ${j.pubs} pubs.`); pAdmin(); },
   async admpoll(v) { await api("/admin/poll", { q: v.q, options: String(v.options || "").split("\n") }); toast("Poll live."); pAdmin(); },
   async join(v) {
+    if (String(v.nick || "").trim().length < 3) throw new Error("Pick a nickname of at least 3 letters.");
+    if (String(v.password || "").length < 6) throw new Error("Password needs at least 6 characters.");
     if (!v.rules) throw new Error("Tick the box to confirm you're 18+ and happy with the house rules.");
-    const j = await api("/me/create", { nick: v.nick, from: v.from, rules: true });
-    AUTH = `${j.id}.${j.key}`; LS.set("alawAuth", AUTH); LS.set("alawSaveCode", "1");
+    const j = await api("/me/create", { nick: v.nick, password: v.password, rules: true });
+    AUTH = `${j.id}.${j.key}`; LS.set("alawAuth", AUTH); remember(j.nick, AUTH);
     await refreshBoot(); checkInbox(); toast(`You're in, ${j.nick}. Marching on together.`);
     route();
   },
   async login(v) {
-    const code = String(v.code || "").trim(); const old = AUTH; AUTH = code;
-    try { await api("/me"); LS.set("alawAuth", code); await refreshBoot(); toast("Welcome back."); route(); }
-    catch (e) { AUTH = old; throw new Error("That code didn't work. Check you copied all of it."); }
+    if (!String(v.nick || "").trim() || !v.password) throw new Error("Enter your nickname and password.");
+    const j = await api("/login", { nick: v.nick, password: v.password });
+    const me = await signIn(j.token); toast(`Welcome back, ${me.nick}.`); goIn();
   },
   async chat(v, form) {
     if (needJoin()) return;

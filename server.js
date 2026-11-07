@@ -49,10 +49,20 @@ setInterval(() => { const t = now(); for (const [k, v] of HITS) if (!v.length ||
 function authUser(req) {
   const h = String(req.headers["x-alaw-auth"] || ""); const [id, key] = h.split(".");
   if (!id || !key) return null;
-  const u = store.get("users", id);
-  if (!u || u.hash !== sha(key) || u.banned) return null;
-  return u;
+  const u = store.get("users", id); if (!u || u.banned) return null;
+  const k = sha(key);
+  return u.hash === k || (u.keys || []).includes(k) ? u : null;
 }
+/* passwords: salted scrypt, never stored in plain text */
+function pwHash(pw) { const salt = crypto.randomBytes(16).toString("hex"); return salt + ":" + crypto.scryptSync(String(pw), salt, 32).toString("hex"); }
+function pwCheck(pw, stored) {
+  if (!stored || !stored.includes(":")) return false;
+  const [salt, h] = stored.split(":"); const a = Buffer.from(h, "hex"), b = crypto.scryptSync(String(pw), salt, 32);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+function newSession(u) { const key = rid(24); u.keys = [sha(key), ...(u.keys || [])].slice(0, 6); store.put("users", u.id, u); return `${u.id}.${key}`; }
+const pwOk = (pw) => typeof pw === "string" && pw.length >= 6 && pw.length <= 100;
+const byNick = (n) => store.all("users").find((u) => u.nick.toLowerCase() === String(n || "").trim().toLowerCase());
 const isAdmin = (req) => ADMIN_KEY.length >= 8 && String(req.headers["x-alaw-admin"] || "") === ADMIN_KEY;
 const banned = (uid) => { const u = store.get("users", uid); return !u || !!u.banned; };
 const nickOf = (uid) => { const u = store.get("users", uid); return u ? u.nick : "Former fan"; };
@@ -312,11 +322,25 @@ async function api(req, res, url) {
     if (!/^[A-Za-z0-9 _.\-']{3,20}$/.test(nick)) return send(res, 400, { error: "Nickname: 3 to 20 letters or numbers." });
     if (store.all("users").some((u) => u.nick.toLowerCase() === nick.toLowerCase())) return send(res, 409, { error: "That nickname's taken. Try another." });
     if (!body.rules) return send(res, 400, { error: "Please agree to the house rules." });
+    if (!pwOk(body.password)) return send(res, 400, { error: "Password needs at least 6 characters." });
     const id = rid(8), key = rid(24);
-    store.put("users", id, { id, nick, from: clean(body.from, 30), bio: "", hash: sha(key), created: now(), blocked: [] });
+    store.put("users", id, { id, nick, from: clean(body.from, 30), bio: "", hash: sha(key), keys: [], pw: pwHash(body.password), created: now(), blocked: [] });
     return send(res, 200, { id, key, nick });
   }
-  if (p === "/api/me" && M === "GET") { if (!need()) return; return send(res, 200, { me: { ...pubUser(me), blocked: me.blocked || [], blockedList: (me.blocked || []).map((id) => ({ id, nick: nickOf(id) })) }, stats: statsOf(me.id) }); }
+  if (p === "/api/login" && M === "POST") {
+    const nk = String(body.nick || "").trim().toLowerCase();
+    if (limited("login:" + ipOf(req), 20, 900e3) || limited("loginnick:" + nk, 8, 900e3)) return send(res, 429, { error: "Too many tries. Wait 15 minutes and try again." });
+    const u = byNick(nk);
+    if (!u || u.banned || !pwCheck(body.password, u.pw)) return send(res, 401, { error: "Nickname or password not right." });
+    return send(res, 200, { token: newSession(u), nick: u.nick });
+  }
+  if (p === "/api/me/password" && M === "POST") {
+    if (!need()) return;
+    if (me.pw && !pwCheck(body.current, me.pw)) return send(res, 400, { error: "Your current password isn't right." });
+    if (!pwOk(body.password)) return send(res, 400, { error: "New password needs at least 6 characters." });
+    me.pw = pwHash(body.password); store.put("users", me.id, me); return send(res, 200, { ok: true });
+  }
+  if (p === "/api/me" && M === "GET") { if (!need()) return; return send(res, 200, { me: { ...pubUser(me), hasPw: !!me.pw, blocked: me.blocked || [], blockedList: (me.blocked || []).map((id) => ({ id, nick: nickOf(id) })) }, stats: statsOf(me.id) }); }
   if (p === "/api/me/update" && M === "POST") {
     if (!need()) return;
     me.from = clean(body.from, 30); me.bio = clean(body.bio, 160); store.put("users", me.id, me);
@@ -666,6 +690,12 @@ async function api(req, res, url) {
       const g = groundsList().find((x) => x.key === String(body.key || "")); if (!g) return send(res, 404, { error: "Ground not found." });
       const mm = String(body.coords || "").match(/(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/); if (!mm) return send(res, 400, { error: "Paste coordinates like 53.7778, -1.5721" });
       GEO.setGeo(g.key, +mm[1], +mm[2]); const n = await GEO.nearby(g, true); return send(res, 200, { ok: true, pubs: n ? n.pubs.length : 0, error: GEO.status().error });
+    }
+    if (p === "/api/admin/resetpw" && M === "POST") {
+      const u = byNick(body.nick); if (!u) return send(res, 404, { error: "No fan with that nickname." });
+      const temp = rid(4).replace(/[^A-Za-z0-9]/g, "x") + "-" + Math.floor(1000 + Math.random() * 9000);
+      u.pw = pwHash(temp); u.keys = []; store.put("users", u.id, u);
+      return send(res, 200, { nick: u.nick, temp });
     }
     if (p === "/api/admin/wipe" && M === "POST") {
       if (body.confirm !== "DELETE") return send(res, 400, { error: "Type DELETE to confirm." });
