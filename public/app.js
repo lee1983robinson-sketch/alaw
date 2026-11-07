@@ -79,7 +79,7 @@ const ic = (n, s = 20, extra = "") => `<svg aria-hidden="true" width="${s}" heig
 
 /* ---------- nav and shell ---------- */
 function nav(on) {
-  const L = [["", "home", "Matchday"], ["feed", "chat", "Feed"], ["games", "cal", "Games"], ["pubs", "pint", "Pubs"], ["me", "user", ME ? "Me" : "Join"]];
+  const L = [["", "home", "Matchday"], ["feed", "chat", "Feed"], ["games", "cal", "Games"], ["pubs", "pint", "Pubs"], ["me", "user", "Me"]];
   NAV.innerHTML = L.map(([r, i, t]) => `<a href="#/${r}" class="${on === r ? "on" : ""}" ${on === r ? 'aria-current="page"' : ""}>${ic(i, 22)}${t}${r === "me" && (UNREAD || NOTES) ? '<span class="dot" aria-label="New activity"></span>' : ""}</a>`).join("");
 }
 function topbar() {
@@ -91,7 +91,15 @@ function topbar() {
     </div></header>`;
 }
 function backBtn(href, label = "Back") { return `<a href="${href}" class="ibtn" aria-label="${esc(label)}">${ic("back")}</a>`; }
-const needJoin = () => { if (ME) return false; toast("Join ALAW first. It takes 10 seconds."); location.hash = "#/me"; return true; };
+const needJoin = () => {
+  if (ME) return false;
+  sheet(`<h2 class="h2" style="font-size:24px">Pick a nickname</h2>
+    <p class="note">That's all ALAW needs. No email, no password.</p>
+    <form data-form="quickjoin" class="col"><div><label class="l" for="qjn">Nickname</label><input class="f" id="qjn" name="nick" minlength="3" maxlength="20" autocomplete="nickname" placeholder="e.g. TomLUFC" required></div>
+    <label class="check"><input type="checkbox" name="rules" required> I'm 18 or over and I'll stick to the <a href="#/rules">house rules</a>.</label>
+    <button class="btn y big">Let's go</button><button type="button" class="btn" data-act="close-sheet">Not now</button></form>`);
+  return true;
+};
 
 /* ---------- sheets ---------- */
 function sheet(html) {
@@ -133,9 +141,9 @@ window.addEventListener("hashchange", route);
 
 /* ---------- home: the feed ---------- */
 function goingBtn(f, big) {
-  const p = past(f), on = f.mine;
-  const label = p ? (on ? "You went" : "I went") : on ? "You're going" : "I'm going";
-  return `<button class="btn ${on ? "on" : "y"} ${big ? "big" : ""}" data-act="going" data-fid="${esc(f.id)}" data-on="${on ? 0 : 1}" aria-pressed="${on}">${on ? ic("check", 18) : ""}${label}</button>`;
+  const p = past(f), go = f.mode === "go" || (f.mine && !f.mode), wa = f.mode === "watch";
+  const b = (mode, on, offL, onL) => `<button class="btn ${on ? "on" : mode === "go" ? "y" : ""} ${big ? "big" : ""}" data-act="going" data-mode="${mode}" data-fid="${esc(f.id)}" data-on="${on ? 0 : 1}" aria-pressed="${on}">${on ? ic("check", 18) : ""}${on ? onL : offL}</button>`;
+  return `<div class="row" style="gap:8px">${b("go", go, p ? "I went" : "I'm going", p ? "You went" : "Going")}${b("watch", wa, p ? "I watched" : "I'm watching", p ? "Watched" : "Watching")}</div>`;
 }
 function gameOptions(sel) {
   const up = BOOT.fixtures.filter((f) => f.ts > NOW() - 3 * H).slice(0, 3), rec = BOOT.fixtures.filter((f) => f.ts <= NOW() - 3 * H).slice(-2).reverse();
@@ -308,7 +316,7 @@ function pAways(filter) {
     <div class="date"><span>${wk(f.ts)}</span><b>${fmtTime(f.ts)}</b></div>
     <div class="grow"><div style="font-weight:700">${f.isAway ? "at " + esc(short(f.home.name)) : "v " + esc(short(f.away.name)) + " (H)"}</div>
     <div class="tiny muted">${fmtDay(f.ts)} · ${esc(f.venue.name || "")}${f.going ? ` · ${f.going} going` : ""}</div></div>
-    ${f.score ? resultOf(f) : f.mine ? '<span class="chip good">Going</span>' : ""}
+    ${f.score ? resultOf(f) : f.mine ? '<span class="chip good">Going</span>' : f.mode === "watch" ? '<span class="chip">Watching</span>' : ""}
   </a>`;
   APP.innerHTML = `<div class="col" style="gap:16px">
     <div><div class="kicker">${BOOT.fixtures[0] ? "This season" : ""}</div><h1 class="h1">${mode === "away" ? "Away days" : mode === "home" ? "Elland Road" : "Fixtures"}</h1></div>
@@ -347,13 +355,13 @@ function drawFixture(tab, home = HUBHOME) {
   counts.hub = D.stream.length;
   APP.innerHTML = `${home ? topbar() : `<div class="row" style="justify-content:space-between;margin-bottom:12px">${backBtn("#/games", "Back to fixtures")}<button class="ibtn" data-act="share" aria-label="Share this game">${ic("share")}</button></div>`}
   <div class="col" style="gap:16px">
-    ${home && !ME ? `<a href="#/me" class="hero" style="padding:14px 16px;flex-direction:row;align-items:center;gap:12px;color:var(--text)"><div class="grow"><div style="font-weight:800;font-size:17px">Every Leeds matchday. One place.</div><div class="tiny soft">Lifts, spare tickets, meet-ups, predictions, who's in which pub. Free, no email.</div></div><span class="btn y">Join</span></a>` : ""}
     <section class="fxhero col">
       <div class="kicker">${home ? (live ? "On now" : "Next game") + " · " : ""}${esc(f.league || "")}${f.league ? " · " : ""}${fmtDay(f.ts)} ${fmtTime(f.ts)}${until(f.ts) && !live ? " · " + esc(until(f.ts)) : ""}</div>
       <h1 class="h1" style="font-size:42px">${titleOf(f)}</h1>
       <div class="soft small row" style="gap:6px">${ic("pin", 16)}${esc([f.venue.name, f.venue.city].filter(Boolean).join(", ") || "Venue to be confirmed")} ${f.score && !live ? resultOf(f) : ""}</div>
       <div id="livebox">${liveHtml(f, D.live, false)}</div>
-      <div class="row" style="gap:10px;flex-wrap:wrap">${facesHtml(D.who, f.going, past(f))}${goingBtn(f)}</div>
+      ${facesHtml(D.who, f.going, past(f))}
+      <div class="gobtns">${goingBtn(f)}</div>
     </section>
     <div class="tabs" role="tablist" aria-label="Matchday sections">${TABS.filter(([k]) => k !== "rate" || showRate).map(([k, t]) => `<a role="tab" aria-selected="${tab === k}" class="tab ${tab === k ? "on" : ""}" href="${tabHref(k)}">${t}${counts[k] && k !== "hub" ? ` · ${counts[k]}` : ""}</a>`).join("")}</div>
     <div id="tab" class="col">${(TABV[tab] || TABV.hub)(D)}</div>
@@ -362,9 +370,18 @@ function drawFixture(tab, home = HUBHOME) {
   if (tab === "chat") { const c = $("#chatlist"); if (c) window.scrollTo(0, document.body.scrollHeight); }
   if (tab === "map" || tab === "hub") drawMap("map", D.map, D.pubs, D.meets).catch(() => {});
 }
+function watchSheet() {
+  const D = FD, f = D.fixture;
+  sheet(`<h2 class="h2" style="font-size:24px">Where are you watching?</h2>
+    <p class="note">Join Leeds fans already watching together, or add your pub so others can find you.</p>
+    ${D.watch.length ? D.watch.map((m) => `<div class="card row" style="gap:10px"><div class="grow"><b>${esc(m.where)}</b><div class="tiny muted">${esc(m.place || "")}${m.count ? ` · ${m.count} Leeds fan${m.count === 1 ? "" : "s"}` : ""}</div></div><button class="btn ${m.joined ? "on" : "y"}" data-act="meetjoin" data-id="${esc(m.id)}" data-on="${m.joined ? 0 : 1}">${m.joined ? "You're in" : "I'll be there"}</button></div>`).join("") : `<div class="tiny muted">Nobody's posted a pub yet. Be the first.</div>`}
+    <form data-form="meet" class="col"><input type="hidden" name="fid" value="${esc(f.id)}"><input type="hidden" name="kind" value="watch">
+      <div class="row" style="gap:8px"><div class="grow" style="flex:2"><label class="l" for="ws1">Pub or venue</label><input class="f" id="ws1" name="where" maxlength="80" placeholder="The Peacock" required></div><div class="grow"><label class="l" for="ws2">Town</label><input class="f" id="ws2" name="place" maxlength="50" placeholder="Leeds"></div></div>
+      <button class="btn y big">Add my pub</button><button type="button" class="btn" data-act="close-sheet">Just watching at home</button></form>`);
+}
 function facesHtml(who, n, wasPast) {
-  const W = (who || []).slice(0, 7);
-  return `<a href="#/f/${esc(FD.fixture.id)}/info" class="row grow" style="gap:10px;color:var(--text);min-height:44px"><span class="faces">${W.map((w) => av(w.nick)).join("") || `<span class="av" style="background:var(--card2);color:var(--muted)">${ic("user", 16)}</span>`}</span><span class="small"><b style="font-size:16px">${n}</b> ${wasPast ? "went" : "going"}${W.length ? `<span class="tiny muted" style="display:block">${W.slice(0, 3).map((w) => esc(w.nick)).join(", ")}${n > 3 ? " and others" : ""}</span>` : ""}</span></a>`;
+  const W = [...(who || []), ...((FD && FD.watchers) || [])].slice(0, 7), nw = (FD && FD.fixture.watching) || 0;
+  return `<a href="#/f/${esc(FD.fixture.id)}/info" class="row grow" style="gap:10px;color:var(--text);min-height:44px"><span class="faces">${W.map((w) => av(w.nick)).join("") || `<span class="av" style="background:var(--card2);color:var(--muted)">${ic("user", 16)}</span>`}</span><span class="small"><b style="font-size:16px">${n}</b> ${wasPast ? "went" : "going"} · <b style="font-size:16px">${nw}</b> watching${W.length ? `<span class="tiny muted" style="display:block">${W.slice(0, 3).map((w) => esc(w.nick)).join(", ")}${n > 3 ? " and others" : ""}</span>` : ""}</span></a>`;
 }
 const TILES = [
   ["liftneed", "car", "Need a lift", "#FFD36B", "#3A2E0B"], ["liftoffer", "car", "Got a spare seat", "#7BD88F", "#143222"],
@@ -458,6 +475,7 @@ const TABV = {
       ${D.tips.filter((p) => !isBlocked(p.uid)).map((p) => `<div class="card col" style="gap:6px"><div class="row">${av(p.nick)}<div class="grow"><a href="#/u/${esc(p.uid)}" style="color:var(--text);font-weight:600">${esc(p.nick)}</a><div class="tiny muted">${p.tag ? `<span class="chip" style="padding:2px 8px;margin-right:4px">${esc(p.tag)}</span>` : ""}${ago(p.at)}</div></div><button class="opt" data-act="opt" data-type="post" data-id="${esc(p.id)}" data-uid="${esc(p.uid)}" aria-label="Options">•••</button></div><div style="line-height:1.45;white-space:pre-wrap">${esc(p.text)}</div><div>${cheerBtn(p)}</div></div>`).join("") || `<div class="empty">No tips yet. ${f.isAway ? "Trains, parking, police escorts, where the away end queue is" : "Parking, park and ride, food, getting in quickly"}: share what you know.</div>`}
       <form data-form="tip" class="col" style="gap:8px"><input type="hidden" name="fid" value="${esc(f.id)}"><label class="sr" for="tipText">Add a travel tip</label><select class="f" name="tag" aria-label="Tip type"><option value="">Type of tip (optional)</option>${(D.tipTags || []).map((t) => `<option>${esc(t)}</option>`).join("")}</select><textarea class="f" id="tipText" name="text" maxlength="400" placeholder="${f.isAway ? "Trains, parking, the walk to the ground, the away end queue…" : "Parking, park and ride, best chippy, which turnstiles are quickest…"}" required></textarea><button class="btn y">Post tip</button></form>
     </section>
+    ${(D.watchers || []).length ? `<section class="col"><h2 class="h2">Watching · ${f.watching}</h2><div class="chips">${D.watchers.map((w) => `<a class="chip" href="#/u/${esc(w.id)}">${esc(w.nick)}</a>`).join("")}</div></section>` : ""}
     <section class="col"><h2 class="h2">${past(f) ? "Who went" : "Who's going"}</h2>
       ${D.who.length ? `<div class="chips">${D.who.map((w) => `<a class="chip" href="#/u/${esc(w.id)}">${esc(w.nick)}</a>`).join("")}${f.going > D.who.length ? `<span class="chip">+${f.going - D.who.length} more</span>` : ""}</div>` : `<div class="empty">Nobody's said yet. Tap "${past(f) ? "I went" : "I'm going"}" above.</div>`}
     </section>`;
@@ -647,7 +665,7 @@ async function drawMap(elId, M, pubs, meets) {
   el.innerHTML = "";
   const L = window.L;
   MAP = L.map(el, { zoomControl: true, scrollWheelZoom: false, tap: true }).setView([M.center.lat, M.center.lng], 15);
-  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", { maxZoom: 19, subdomains: "abcd", attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>' }).addTo(MAP);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors' }).addTo(MAP);
   const icon = (cls, html, size = 30) => L.divIcon({ className: "", html: `<div class="mk ${cls}">${html}</div>`, iconSize: [size, size], iconAnchor: [size / 2, size / 2], popupAnchor: [0, -size / 2] });
   const pts = [[M.center.lat, M.center.lng]];
   L.marker([M.center.lat, M.center.lng], { icon: icon("ground", ic("shield", 18), 38), zIndexOffset: 500, title: "The ground" }).addTo(MAP).bindPopup("<b>The ground</b>");
@@ -765,6 +783,7 @@ function profileHtml(u, s, own) {
     ${own ? "" : backBtn("javascript:history.back()")}
     <div class="row" style="gap:14px">${av(u.nick, "lg")}<div class="grow"><div class="h1" style="font-size:32px">${esc(u.nick)}</div><div class="small soft">${u.from ? "Travels from " + esc(u.from) + " · " : ""}On ALAW since ${dm(u.since)}</div></div></div>
     ${u.bio ? `<p style="margin:0;line-height:1.5" class="soft">${esc(u.bio)}</p>` : ""}
+    ${own && LS.get("alawSaveCode") ? `<div class="rule">Save your recovery code (further down) so you can never lose this account.</div>` : ""}
     <div class="stats"><div class="stat"><b class="y">${s.games}</b><span>games</span></div><div class="stat"><b>${s.aways}</b><span>away days</span></div><div class="stat"><b>${s.grounds}</b><span>away grounds</span></div></div>
     ${own ? "" : `<div class="row"><a class="btn y grow" href="#/dm/${esc(u.id)}">Message</a><button class="btn" data-act="opt" data-type="user" data-id="${esc(u.id)}" data-uid="${esc(u.id)}">More</button></div>`}
     <section class="col"><h2 class="h2">Badges</h2><div class="badges">${s.badges.map((b) => `<div class="badge ${b.got ? "" : "off"}">${ic(b.got ? "medal" : "lock", 26, `style="color:${b.got ? "var(--yellow)" : "var(--muted)"};flex-shrink:0"`)}<div><b>${esc(b.name)}</b><span class="tiny muted">${esc(b.desc)}</span></div></div>`).join("")}</div></section>
@@ -1030,11 +1049,14 @@ const ACT = {
   async admclosepoll(d) { await api("/admin/poll", { close: d.id }); pAdmin(); },
   async going(d) {
     if (needJoin()) return;
-    const j = await api("/going", { fid: d.fid, on: d.on === "1" });
-    const f = BOOT.fixtures.find((x) => x.id === d.fid); if (f) { f.mine = d.on === "1"; f.going = j.going; }
-    if (FD && FD.fixture.id === d.fid) { FD.fixture.mine = d.on === "1"; FD.fixture.going = j.going; }
+    const on = d.on === "1", mode = d.mode || "go";
+    const j = await api("/going", { fid: d.fid, on, mode });
+    const upd = (x) => { if (!x) return; x.mode = on ? mode : null; x.mine = on && mode === "go"; x.going = j.going; x.watching = j.watching; };
+    const f = BOOT.fixtures.find((x) => x.id === d.fid); upd(f);
+    if (FD && FD.fixture.id === d.fid) upd(FD.fixture);
+    if (on && mode === "watch" && FD && FD.fixture.id === d.fid && !past(FD.fixture)) { reDraw(); return watchSheet(); }
     const wasPast = f ? past(f) : false;
-    toast(d.on === "1" ? (wasPast ? "Logged. That's another away day." : "Marching on together. You're down.") : "Taken you off.");
+    toast(on ? (mode === "watch" ? (wasPast ? "Logged as watched." : "Enjoy the game.") : wasPast ? "Logged. That's another one." : "Marching on together. You're down.") : "Taken you off.");
     reDraw();
   },
   async share() {
@@ -1074,7 +1096,7 @@ const ACT = {
     const p = curPubs().find((x) => x.id === d.id); if (!p) return;
     sheet(`<h2 class="h2" style="font-size:20px">Tag ${esc(p.name)}</h2><p class="note">Tap the ones that are true today.</p><div class="chips">${(BOOT.tags || []).map((t) => { const m = p.tags.find((x) => x.t === t); const on = !!(m && m.mine); return `<button class="chip ${on ? "mine" : ""}" style="min-height:40px" data-act="pubtag" data-id="${esc(p.id)}" data-tag="${esc(t)}" data-on="${on ? 0 : 1}" aria-pressed="${on}">${esc(t)}</button>`; }).join("")}</div><button class="btn" data-act="close-sheet">Done</button>`);
   },
-  async meetjoin(d) { if (needJoin()) return; await api("/meet/join", { id: d.id, on: d.on === "1" }); toast(d.on === "1" ? "You're in. See you there." : "Taken you off."); reload(); },
+  async meetjoin(d) { if (needJoin()) return; await api("/meet/join", { id: d.id, on: d.on === "1" }); closeSheet(); toast(d.on === "1" ? "You're in. See you there." : "Taken you off."); reload(); },
   async close(d) { await api("/close", { type: d.type, id: d.id, on: d.on === "1" }); toast(d.on === "1" ? "Marked. Nice one." : "Reopened."); if (d.type === "lost") pLost(); else reload(); },
   view(d) { viewer(+d.i, d.src); },
   async feedmore() { await loadFeed(false); },
@@ -1113,7 +1135,7 @@ const ACT = {
       <button class="btn y big">Drop the pin</button><button type="button" class="btn" data-act="close-sheet">Cancel</button></form>`);
   },
   "close-sheet"() { closeSheet(); },
-  showcode() { $("#codebox").innerHTML = `<div class="code" id="code">${esc(AUTH)}</div><button class="btn" data-act="copycode">Copy code</button>`; },
+  showcode() { LS.set("alawSaveCode", null); $("#codebox").innerHTML = `<div class="code" id="code">${esc(AUTH)}</div><button class="btn" data-act="copycode">Copy code</button>`; },
   async copycode() { try { await navigator.clipboard.writeText(AUTH); toast("Copied. Keep it somewhere safe."); } catch (e) { toast("Press and hold the code to copy it."); } },
   logout() {
     sheet(`<h2 class="h2" style="font-size:20px">Log out?</h2><p class="note">Make sure you've saved your recovery code first, or you won't be able to get back into this account.</p><button class="btn y" data-act="logoutyes">Log out</button><button class="btn" data-act="close-sheet">Cancel</button>`);
@@ -1153,6 +1175,11 @@ function getPos() {
   return new Promise((ok, no) => navigator.geolocation.getCurrentPosition((p) => ok({ lat: +p.coords.latitude.toFixed(5), lng: +p.coords.longitude.toFixed(5) }), (e) => no(new Error(e.code === 1 ? "Location is blocked. Allow it in your browser settings to drop a pin." : "Couldn't find your location. Try again outside.")), { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }));
 }
 const FORM = {
+  async quickjoin(v) {
+    const j = await api("/me/create", { nick: v.nick, rules: !!v.rules });
+    AUTH = `${j.id}.${j.key}`; LS.set("alawAuth", AUTH); LS.set("alawSaveCode", "1");
+    await refreshBoot(); closeSheet(); toast(`Welcome, ${j.nick}. Marching on together.`); reload();
+  },
   async quicklift(v) { await api("/lift", { ...v, share: !!v.share }); closeSheet(); toast(v.kind === "need" ? "Posted. Drivers can message you." : "Seats offered. Legend."); reload(); },
   async quickticket(v) { await api("/ticket", { ...v, official: !!v.official }); closeSheet(); toast("Posted."); reload(); },
   async predict(v) { const j = await api("/predict", { fid: v.fid, h: +v.h, a: +v.a }); closeSheet(); FD.preds = j.preds; toast("Locked in. Good luck!"); reload(); },

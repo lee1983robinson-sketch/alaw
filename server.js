@@ -61,7 +61,7 @@ const vis = (x) => !!x && !x.hidden && (!x.uid || !banned(x.uid));
 /* ---------- stats and badges ---------- */
 function statsOf(uid) {
   const fx = new Map(FX.list().map((f) => [f.id, f]));
-  const mine = store.all("going").filter((g) => g.uid === uid).map((g) => fx.get(g.fid)).filter(Boolean);
+  const mine = store.all("going").filter((g) => g.uid === uid && !isWatch(g)).map((g) => fx.get(g.fid)).filter(Boolean);
   const past = mine.filter((f) => f.ts < now() - 2 * 3600e3);
   const aways = past.filter((f) => f.isAway), homes = past.filter((f) => !f.isAway);
   const rated = store.all("ratings").filter((r) => r.uid === uid).length;
@@ -97,12 +97,13 @@ function statsOf(uid) {
 const pubUser = (u) => u && ({ id: u.id, nick: u.nick, from: u.from || "", bio: u.bio || "", since: u.created });
 
 /* ---------- fixtures with counts ---------- */
-function goingCount() {
-  const c = {}; for (const g of store.all("going")) if (!banned(g.uid)) c[g.fid] = (c[g.fid] || 0) + 1; return c;
+const isWatch = (g) => g.mode === "watch";
+function goingCount(watch = false) {
+  const c = {}; for (const g of store.all("going")) if (!banned(g.uid) && isWatch(g) === watch) c[g.fid] = (c[g.fid] || 0) + 1; return c;
 }
 function fixturesOut(uid) {
-  const c = goingCount(); const mine = new Set(uid ? store.all("going").filter((g) => g.uid === uid).map((g) => g.fid) : []);
-  return FX.list().map((f) => ({ ...f, going: c[f.id] || 0, mine: mine.has(f.id) }));
+  const c = goingCount(), w = goingCount(true); const mine = new Map(uid ? store.all("going").filter((g) => g.uid === uid).map((g) => [g.fid, isWatch(g) ? "watch" : "go"]) : []);
+  return FX.list().map((f) => ({ ...f, going: c[f.id] || 0, watching: w[f.id] || 0, mine: mine.get(f.id) === "go", mode: mine.get(f.id) || null }));
 }
 
 /* ---------- item views ---------- */
@@ -140,9 +141,9 @@ function pubOut(p, me) {
 }
 function ensurePub(id) {
   let x = store.get("pubs", id); if (x) return x;
-  if (!/^o[nwr]\d+$/.test(id)) return null;
+  if (!/^(o[nwr]|f)\d+$/.test(id)) return null;
   const o = GEO.findOsmPub(id); if (!o) return null;
-  return store.put("pubs", id, { id, ground: o.ground, name: o.name, lat: o.lat, lng: o.lng, d: o.d, walk: Math.max(1, Math.round(o.d / 80)), kind: o.kind, source: "osm", tags: {}, votes: {}, at: now() });
+  return store.put("pubs", id, { id, ground: o.ground, name: o.name, address: o.address || "", lat: o.lat, lng: o.lng, d: o.d, walk: Math.max(1, Math.round(o.d / 80)), kind: o.kind, source: id[0] === "f" ? "fsa" : "osm", tags: {}, votes: {}, at: now() });
 }
 const meetLive = (m) => !m.expires || m.expires > now();
 const meetOut = (m, me) => ({ id: m.id, fid: m.fid, kind: m.kind || "meet", lat: m.lat ?? null, lng: m.lng ?? null, pin: !!m.pin, expires: m.expires || null, place: m.place || "", first: !!m.first, uid: m.uid, nick: nickOf(m.uid), title: m.title, where: m.where, time: m.time, details: m.details, at: m.at, count: (m.joined || []).filter((u) => !banned(u)).length, joined: !!(me && (m.joined || []).includes(me.id)), who: (m.joined || []).filter((u) => !banned(u)).slice(0, 12).map(nickOf) });
@@ -160,28 +161,31 @@ function groundsList() {
     G.set(f.ground, g);
   }
   for (const g of G.values()) { const n = GEO.cached(g.key); if (n) { g.pubs = n.pubs.length; g.center = n.center; } }
-  for (const p of store.all("pubs")) if (vis(p) && p.source !== "osm") { const g = G.get(p.ground); if (g) g.pubs++; }
+  for (const p of store.all("pubs")) if (vis(p) && (!p.source || p.source === "fan")) { const g = G.get(p.ground); if (g) g.pubs++; }
   return [...G.values()].sort((a, b) => (a.next ? a.next.ts : 9e15) - (b.next ? b.next.ts : 9e15));
 }
 function pubsFor(ground, me) {
   const near = GEO.cached(ground), saved = store.all("pubs").filter((p) => p.ground === ground);
   const byId = new Map(saved.map((p) => [p.id, p]));
   const out = [];
-  for (const o of (near && near.pubs) || []) { const p = byId.get(o.id); if (p && !vis(p)) continue; out.push(pubOut(p || { ...o, ground, walk: Math.max(1, Math.round(o.d / 80)), source: "osm" }, me)); byId.delete(o.id); }
-  for (const p of byId.values()) if (vis(p)) out.push(pubOut(p, me));
+  for (const o of (near && near.pubs) || []) { const p = byId.get(o.id); if (p && !vis(p)) continue; out.push(pubOut(p || { ...o, ground, walk: Math.max(1, Math.round(o.d / 80)), source: o.id[0] === "f" ? "fsa" : "osm" }, me)); byId.delete(o.id); }
+  for (const p of byId.values()) if (vis(p) && (p.source === "fan" || !p.source || p.votes && Object.keys(p.votes).length || hereAt(p.id).length)) out.push(pubOut(p, me));
   const score = (p) => p.here * 1000 + (p.score != null ? p.score + p.votes * 2 : -1);
   return out.sort((a, b) => score(b) - score(a) || (a.d ?? 9e9) - (b.d ?? 9e9));
 }
 function mapFor(ground) { const n = GEO.cached(ground); return n ? { center: n.center, stations: n.stations, parking: n.parking } : null; }
 
 function fixtureDetail(f, me) {
-  const c = goingCount();
-  const going = store.all("going").filter((g) => g.fid === f.id && !banned(g.uid));
+  const c = goingCount(), w = goingCount(true);
+  const all = store.all("going").filter((g) => g.fid === f.id && !banned(g.uid));
+  const going = all.filter((g) => !isWatch(g)), watching = all.filter(isWatch);
+  const myG = me ? all.find((g) => g.uid === me.id) : null;
   const posts = store.all("posts").filter((p) => p.fid === f.id && vis(p)).sort((a, b) => a.at - b.at);
   const CI = commentIndex();
   return {
-    fixture: { ...f, going: c[f.id] || 0, mine: !!(me && going.some((g) => g.uid === me.id)) },
+    fixture: { ...f, going: c[f.id] || 0, watching: w[f.id] || 0, mine: !!(myG && !isWatch(myG)), mode: myG ? (isWatch(myG) ? "watch" : "go") : null },
     who: going.sort((a, b) => b.at - a.at).slice(0, 40).map((g) => ({ id: g.uid, nick: nickOf(g.uid) })),
+    watchers: watching.sort((a, b) => b.at - a.at).slice(0, 40).map((g) => ({ id: g.uid, nick: nickOf(g.uid) })),
     chat: posts.filter((p) => p.kind === "chat").slice(-120).map((p) => postFor(p, me)),
     tips: posts.filter((p) => p.kind === "tip").reverse().slice(0, 40).map((p) => postFor(p, me)),
     photos: posts.filter((p) => p.kind === "photo").reverse().slice(0, 120).map((p) => postFor(p, me, CI)),
@@ -344,8 +348,9 @@ async function api(req, res, url) {
   if ((m = p.match(/^\/api\/live\/([\w-]+)$/))) { const f = FX.byId(m[1]); if (!f) return send(res, 404, { error: "Fixture not found." }); return send(res, 200, { live: await LIVE.live(f).catch(() => null) }); }
   if (p === "/api/going" && M === "POST") {
     if (!need()) return; const f = FX.byId(String(body.fid || "")); if (!f) return send(res, 404, { error: "Fixture not found." });
-    const k = `${f.id}:${me.id}`; if (body.on) store.put("going", k, { fid: f.id, uid: me.id, at: now() }); else store.del("going", k);
-    return send(res, 200, { ok: true, going: goingCount()[f.id] || 0 });
+    const k = `${f.id}:${me.id}`; const mode = body.mode === "watch" ? "watch" : "go";
+    if (body.on) store.put("going", k, { fid: f.id, uid: me.id, at: now(), mode }); else store.del("going", k);
+    return send(res, 200, { ok: true, going: goingCount()[f.id] || 0, watching: goingCount(true)[f.id] || 0 });
   }
 
   /* posts: chat and travel tips */
@@ -667,7 +672,7 @@ function indexHtml() {
 const SEC = {
   "x-content-type-options": "nosniff", "referrer-policy": "strict-origin-when-cross-origin", "x-frame-options": "DENY",
   "permissions-policy": "geolocation=(self), microphone=(), camera=()",
-  "content-security-policy": "default-src 'self'; img-src 'self' data: blob: https://*.basemaps.cartocdn.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; connect-src 'self' https://cloudflareinsights.com; frame-ancestors 'none'",
+  "content-security-policy": "default-src 'self'; img-src 'self' data: blob: https://tile.openstreetmap.org; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; connect-src 'self' https://cloudflareinsights.com; frame-ancestors 'none'",
 };
 async function serveStatic(req, res, url) {
   let m;
