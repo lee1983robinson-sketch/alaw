@@ -1,6 +1,6 @@
 {
   "name": "alaw",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "private": true,
   "description": "ALAW: the Leeds United matchday hub. Social feed, live scores, team news, pubs and stations near every ground on a map, check-ins, pins, meet-ups, lifts, spare tickets, player ratings and photos.",
   "main": "server.js",

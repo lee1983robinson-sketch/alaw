@@ -147,6 +147,19 @@ nav.bar a .dot{top:4px;right:calc(50% - 16px)}
 .btn:active,.chip:active,.ibtn:active{transform:scale(.96)}
 .card{transition:border-color .2s}
 @media (prefers-reduced-motion:reduce){.pulse,.flash,.mk.hot{animation:none}}
+.fxhero{background:linear-gradient(170deg,#173061 0%,#0F1E3D 60%,var(--card) 100%);border:1px solid var(--line2);border-radius:22px;padding:18px 16px;gap:10px}
+.faces{display:inline-flex}.faces .av{width:34px;height:34px;font-size:14px;border:2px solid #10203F;margin-left:-10px}.faces .av:first-child{margin-left:0}
+.tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.tile{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:14px;border-radius:18px;border:1px solid var(--line);background:var(--card);color:var(--text);text-align:left;min-height:104px;transition:transform .1s,border-color .2s}
+.tile:hover{border-color:var(--line2)}.tile b{font-size:15px;line-height:1.2}.tile .s{font-size:12px;color:var(--muted)}
+.tile .ti{width:40px;height:40px;border-radius:13px;display:flex;align-items:center;justify-content:center;margin-bottom:2px}
+.sic{width:36px;height:36px;border-radius:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.sitem{padding:12px 14px}
+.predbar{display:flex;height:14px;border-radius:7px;overflow:hidden;background:var(--card2)}.predbar span{height:100%;transition:width .6s}
+.stepper{display:flex;align-items:center;gap:12px}.stepper .ibtn{width:52px;height:52px;border-radius:26px;font-size:26px;font-weight:700;background:var(--card2)}
+.stepper output{font-family:var(--head);font-size:46px;font-weight:800;width:44px;text-align:center;color:var(--yellow)}
+.fab{position:fixed;right:16px;bottom:calc(90px + env(safe-area-inset-bottom));z-index:15;background:var(--yellow);color:#0B1426!important;font-weight:800;border-radius:26px;padding:0 18px;height:50px;display:flex;align-items:center;gap:8px;box-shadow:0 8px 22px rgba(0,0,0,.5)}
+@media (min-width:900px){.fab{right:calc(50% - 264px)}}
 .code{font-family:ui-monospace,Menlo,monospace;background:var(--bg2);border:1px solid var(--line2);border-radius:10px;padding:10px;word-break:break-all;font-size:14px}
 @media (min-width:900px){ .wrap{padding-top:28px} nav.bar{left:50%;transform:translateX(-50%);max-width:560px;border:1px solid var(--line);border-bottom:0;border-radius:18px 18px 0 0} }
 </style>

@@ -71,7 +71,7 @@ function statsOf(uid) {
   const photos = posts.filter((p) => p.kind === "photo").length;
   const pubsAdded = store.all("pubs").filter((p) => p.uid === uid && !p.hidden).length;
   const pubsRated = store.all("pubs").filter((p) => p.votes && p.votes[uid]).length;
-  const lifts = store.all("lifts").filter((l) => l.uid === uid).length;
+  const lifts = store.all("lifts").filter((l) => l.uid === uid && (l.kind || "offer") === "offer").length;
   const u = store.get("users", uid) || {};
   const B = [];
   const add = (id, name, desc, got) => B.push({ id, name, desc, got: !!got });
@@ -85,6 +85,8 @@ function statsOf(uid) {
   add("snap", "Snapper", "Shared 10 photos", photos >= 10);
   add("er", "Elland Road regular", "10 home games logged", homes.length >= 10);
   add("rate", "Pundit", "Rated the lads after 5 games", rated >= 5);
+  const exact = (() => { const fx = new Map(FX.list().map((f) => [f.id, f])); return store.all("preds").filter((p) => p.uid === uid && fx.get(p.fid) && predPoints(p, fx.get(p.fid)) === 3).length; })();
+  add("crystal", "Crystal ball", "Predicted 3 exact scores", exact >= 3);
   add("og", "Founding fan", "Joined in ALAW's first season", (u.created || now()) < Date.parse("2027-07-01"));
   return {
     games: past.length, aways: aways.length, homes: homes.length, grounds: grounds.size, rated, upcoming: mine.filter((f) => f.ts >= now() - 2 * 3600e3).length,
@@ -144,7 +146,7 @@ function ensurePub(id) {
 }
 const meetLive = (m) => !m.expires || m.expires > now();
 const meetOut = (m, me) => ({ id: m.id, fid: m.fid, kind: m.kind || "meet", lat: m.lat ?? null, lng: m.lng ?? null, pin: !!m.pin, expires: m.expires || null, place: m.place || "", first: !!m.first, uid: m.uid, nick: nickOf(m.uid), title: m.title, where: m.where, time: m.time, details: m.details, at: m.at, count: (m.joined || []).filter((u) => !banned(u)).length, joined: !!(me && (m.joined || []).includes(me.id)), who: (m.joined || []).filter((u) => !banned(u)).slice(0, 12).map(nickOf) });
-const liftOut = (l) => ({ id: l.id, fid: l.fid, uid: l.uid, nick: nickOf(l.uid), from: l.from, depart: l.depart, back: l.back, seats: l.seats, cost: l.cost, notes: l.notes, closed: !!l.closed, at: l.at, given: store.all("lifts").filter((x) => x.uid === l.uid).length });
+const liftOut = (l) => ({ id: l.id, fid: l.fid, kind: l.kind || "offer", uid: l.uid, nick: nickOf(l.uid), from: l.from, depart: l.depart, back: l.back, seats: l.seats, cost: l.cost, notes: l.notes, closed: !!l.closed, at: l.at, given: store.all("lifts").filter((x) => x.uid === l.uid && (x.kind || "offer") === "offer").length });
 const ticketOut = (t) => ({ id: t.id, fid: t.fid, uid: t.uid, nick: nickOf(t.uid), kind: t.kind, qty: t.qty, area: t.area, notes: t.notes, closed: !!t.closed, at: t.at });
 
 const TIP_TAGS = ["Trains", "Driving & parking", "Buses & park and ride", "At the ground", "Food & drink"];
@@ -190,6 +192,47 @@ function fixtureDetail(f, me) {
     tickets: store.all("tickets").filter((t) => t.fid === f.id && vis(t)).sort((a, b) => a.closed - b.closed || b.at - a.at).map(ticketOut),
     pubs: pubsFor(f.ground, me), map: mapFor(f.ground), tagList: TAGS, tipTags: TIP_TAGS,
   };
+}
+
+/* ---------- score predictions ---------- */
+const SIGNS = (h, a) => (h > a ? "H" : h < a ? "A" : "D");
+function predPoints(p, f) { if (!f.score || !["FT", "AET", "PEN"].includes(f.status)) return null; const [h, a] = f.score; if (p.h === h && p.a === a) return 3; return SIGNS(p.h, p.a) === SIGNS(h, a) ? 1 : 0; }
+function predSummary(f, me) {
+  const P = store.all("preds").filter((p) => p.fid === f.id && !banned(p.uid));
+  const n = P.length, res = { H: 0, D: 0, A: 0 }, sc = {};
+  for (const p of P) { res[SIGNS(p.h, p.a)]++; const k = `${p.h}-${p.a}`; sc[k] = (sc[k] || 0) + 1; }
+  const pc = (x) => (n ? Math.round((x / n) * 100) : 0);
+  const win = f.isAway ? res.A : res.H, loss = f.isAway ? res.H : res.A;
+  const mine = me ? store.get("preds", `${f.id}:${me.id}`) : null;
+  const done = f.score && ["FT", "AET", "PEN"].includes(f.status);
+  return { n, win: pc(win), draw: pc(res.D), loss: pc(loss), top: Object.entries(sc).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([s, c]) => ({ s, n: c })),
+    mine: mine ? { h: mine.h, a: mine.a, pts: predPoints(mine, f) } : null, locked: now() >= f.ts - 60e3, done: !!done,
+    exact: done ? P.filter((p) => predPoints(p, f) === 3).map((p) => nickOf(p.uid)).slice(0, 12) : [] };
+}
+function predLeague(me) {
+  const fx = new Map(FX.list().map((f) => [f.id, f])); const T = {};
+  for (const p of store.all("preds")) {
+    if (banned(p.uid)) continue; const f = fx.get(p.fid); if (!f) continue; const pts = predPoints(p, f); if (pts == null) continue;
+    const t = (T[p.uid] = T[p.uid] || { uid: p.uid, pts: 0, exact: 0, played: 0 }); t.pts += pts; t.exact += pts === 3 ? 1 : 0; t.played++;
+  }
+  const L = Object.values(T).sort((a, b) => b.pts - a.pts || b.exact - a.exact || a.played - b.played).map((t, i) => ({ ...t, rank: i + 1, nick: nickOf(t.uid) }));
+  return { top: L.slice(0, 50), me: me ? L.find((x) => x.uid === me.id) || null : null, players: L.length };
+}
+
+/* ---------- the matchday stream: everything fans are doing for one game ---------- */
+function streamFor(f, me, D) {
+  const S = [];
+  for (const l of D.lifts) S.push({ type: l.kind === "need" ? "liftneed" : "lift", at: l.at, ...l });
+  for (const t of D.tickets) S.push({ type: t.kind === "wanted" ? "ticketwant" : "ticket", at: t.at, ...t, tkind: t.kind });
+  for (const m of D.meets) S.push({ type: m.pin ? "pin" : "meet", at: m.at, ...m });
+  for (const m of D.watch) S.push({ type: "watch", at: m.at, ...m });
+  for (const p of D.photos.slice(0, 30)) S.push({ type: "photo", ...p });
+  for (const p of D.posts.filter((x) => x.kind === "post").slice(0, 30)) S.push({ type: "post", ...p });
+  for (const p of D.tips.slice(0, 20)) S.push({ type: "tip", ...p });
+  const pubName = new Map(D.pubs.map((p) => [p.id, p.name]));
+  for (const c of store.all("checkins")) if (c.ground === f.ground && c.at > now() - CHECK_MS && !banned(c.uid) && pubName.has(c.pid)) S.push({ type: "checkin", at: c.at, uid: c.uid, nick: nickOf(c.uid), pid: c.pid, pub: pubName.get(c.pid), id: "ci" + c.pid + c.uid });
+  for (const p of store.all("preds").filter((x) => x.fid === f.id && !banned(x.uid)).sort((a, b) => b.at - a.at).slice(0, 25)) S.push({ type: "pred", at: p.at, uid: p.uid, nick: nickOf(p.uid), h: p.h, a: p.a, id: "pr" + p.uid });
+  return S.filter((x) => !(me && (me.blocked || []).includes(x.uid))).sort((a, b) => b.at - a.at).slice(0, 120);
 }
 
 /* ---------- fan player ratings ---------- */
@@ -254,7 +297,7 @@ async function api(req, res, url) {
     FX.refresh();
     return send(res, 200, { fixtures: fixturesOut(me && me.id), me: me ? { ...pubUser(me), blocked: me.blocked || [] } : null, fans: store.all("users").filter((u) => !u.banned).length, tags: TAGS, version: VERSION });
   }
-  if (p === "/api/status") return send(res, 200, { ok: true, version: VERSION, store: store.status(), fixtures: FX.status(), admin: ADMIN_KEY.length >= 8 });
+  if (p === "/api/status") return send(res, 200, { ok: true, version: VERSION, store: store.status(), fixtures: FX.status(), map: GEO.status(), admin: ADMIN_KEY.length >= 8 });
 
   /* accounts */
   if (p === "/api/me/create" && M === "POST") {
@@ -287,8 +330,10 @@ async function api(req, res, url) {
   if ((m = p.match(/^\/api\/f\/([\w-]+)$/))) {
     const f = FX.byId(m[1]); if (!f) return send(res, 404, { error: "Fixture not found." });
     const gi = groundsList().find((g) => g.key === f.ground);
-    const [sq, inj, lv] = await Promise.all([FX.squad(f).catch(() => null), LIVE.injuries(f).catch(() => null), LIVE.live(f).catch(() => null), gi && !GEO.cached(f.ground) ? Promise.race([GEO.nearby(gi), new Promise((r) => setTimeout(r, 9000))]).catch(() => null) : null]);
+    const [sq, inj, lv] = await Promise.all([FX.squad(f).catch(() => null), LIVE.injuries(f).catch(() => null), LIVE.live(f).catch(() => null), gi && !(GEO.cached(f.ground) && GEO.cached(f.ground).pubs.length) ? Promise.race([GEO.nearby(gi), new Promise((r) => setTimeout(r, 9000))]).catch(() => null) : null]);
     const D = fixtureDetail(f, me); D.squad = sq; D.injuries = inj; D.live = lv; D.rate = rateSummary(f, sq, me);
+    if (lv && lv.score) { D.fixture.score = lv.score; D.fixture.status = lv.status; }
+    D.preds = predSummary(D.fixture, me); D.stream = streamFor(f, me, D);
     return send(res, 200, D);
   }
   if ((m = p.match(/^\/api\/chat\/([\w-]+)$/))) {
@@ -385,7 +430,7 @@ async function api(req, res, url) {
   if (p === "/api/grounds") return send(res, 200, { grounds: groundsList() });
   if ((m = p.match(/^\/api\/g\/([\w-]+)$/))) {
     const g = groundsList().find((x) => x.key === m[1]); if (!g) return send(res, 404, { error: "Ground not found." });
-    if (!GEO.cached(g.key)) await Promise.race([GEO.nearby(g), new Promise((r) => setTimeout(r, 9000))]).catch(() => null);
+    if (!(GEO.cached(g.key) && GEO.cached(g.key).pubs.length)) await Promise.race([GEO.nearby(g), new Promise((r) => setTimeout(r, 9000))]).catch(() => null);
     const meets = g.next ? store.all("meets").filter((x) => x.fid === g.next.id && vis(x) && meetLive(x) && x.lat != null).map((x) => meetOut(x, me)) : [];
     return send(res, 200, { ground: { ...g, center: (GEO.cached(g.key) || {}).center || null }, pubs: pubsFor(g.key, me), map: mapFor(g.key), meets, tagList: TAGS });
   }
@@ -442,9 +487,10 @@ async function api(req, res, url) {
   if (p === "/api/lift" && M === "POST") {
     if (!need()) return; if (slow("lift", 6, 3600e3)) return;
     const f = FX.byId(String(body.fid || "")); if (!f) return send(res, 404, { error: "Fixture not found." });
-    const from = clean(body.from, 40); if (!from) return send(res, 400, { error: "Where are you setting off from?" });
-    if (!body.share) return send(res, 400, { error: "Please confirm it's petrol money only." });
-    const id = rid(10); const x = store.put("lifts", id, { id, fid: f.id, uid: me.id, from, depart: clean(body.depart, 5), back: clean(body.back, 5), seats: int(body.seats, 1, 7, 1), cost: int(body.cost, 0, 60, 0), notes: clean(body.notes, 240), closed: false, at: now() });
+    const kind = body.kind === "need" ? "need" : "offer";
+    const from = clean(body.from, 40); if (!from) return send(res, 400, { error: kind === "need" ? "Where do you need picking up from?" : "Where are you setting off from?" });
+    if (kind === "offer" && !body.share) return send(res, 400, { error: "Please confirm it's petrol money only." });
+    const id = rid(10); const x = store.put("lifts", id, { id, fid: f.id, kind, uid: me.id, from, depart: clean(body.depart, 5), back: clean(body.back, 5), seats: int(body.seats, 1, 7, 1), cost: int(body.cost, 0, 60, 0), notes: clean(body.notes, 240), closed: false, at: now() });
     return send(res, 200, { lift: liftOut(x) });
   }
   if (p === "/api/ticket" && M === "POST") {
@@ -467,6 +513,17 @@ async function api(req, res, url) {
     if (c === "posts") for (const cm of store.all("comments")) if (cm.pid === x.id) store.del("comments", cm.id);
     store.del(c, x.id); return send(res, 200, { ok: true });
   }
+
+  /* score predictions */
+  if (p === "/api/predict" && M === "POST") {
+    if (!need()) return; const f = FX.byId(String(body.fid || "")); if (!f) return send(res, 404, { error: "Fixture not found." });
+    if (now() >= f.ts - 60e3) return send(res, 400, { error: "Predictions closed at kick-off." });
+    const h = int(body.h, 0, 15, -1), a = int(body.a, 0, 15, -1); if (h < 0 || a < 0) return send(res, 400, { error: "Pick a score." });
+    const k = `${f.id}:${me.id}`; const was = store.get("preds", k);
+    store.put("preds", k, { fid: f.id, uid: me.id, h, a, at: was ? was.at : now(), edited: was ? now() : undefined });
+    return send(res, 200, { preds: predSummary(f, me) });
+  }
+  if (p === "/api/league") return send(res, 200, predLeague(me));
 
   /* fan player ratings */
   if (p === "/api/rate" && M === "POST") {
@@ -557,7 +614,7 @@ async function api(req, res, url) {
       });
       const manual = FX.list().filter((f) => f.source === "manual");
       const polls = store.all("polls").sort((a, b) => b.at - a.at).slice(0, 10).map((x) => pollOut(x, null));
-      const grounds = groundsList().map((g) => ({ key: g.key, name: g.name, pubs: g.pubs, located: !!GEO.cached(g.key) }));
+      const grounds = groundsList().map((g) => { const n = GEO.cached(g.key); return { key: g.key, name: g.name, pubs: n ? n.pubs.length : 0, located: !!(n && n.center) }; });
       return send(res, 200, { reports: reps, counts: store.status().counts, fixtures: FX.status(), manual, polls, grounds, geo: GEO.status() });
     }
     if (p === "/api/admin/act" && M === "POST") {
@@ -587,7 +644,11 @@ async function api(req, res, url) {
     if (p === "/api/admin/ground" && M === "POST") {
       const g = groundsList().find((x) => x.key === String(body.key || "")); if (!g) return send(res, 404, { error: "Ground not found." });
       const mm = String(body.coords || "").match(/(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/); if (!mm) return send(res, 400, { error: "Paste coordinates like 53.7778, -1.5721" });
-      GEO.setGeo(g.key, +mm[1], +mm[2]); const n = await GEO.nearby(g); return send(res, 200, { ok: true, pubs: n ? n.pubs.length : 0 });
+      GEO.setGeo(g.key, +mm[1], +mm[2]); const n = await GEO.nearby(g, true); return send(res, 200, { ok: true, pubs: n ? n.pubs.length : 0, error: GEO.status().error });
+    }
+    if (p === "/api/admin/pubsearch" && M === "POST") {
+      const g = groundsList().find((x) => x.key === String(body.key || "")); if (!g) return send(res, 404, { error: "Ground not found." });
+      const n = await GEO.nearby(g, true); return send(res, 200, { ok: true, pubs: n ? n.pubs.length : 0, error: GEO.status().error });
     }
     if (p === "/api/admin/refresh" && M === "POST") { await FX.refresh(true); return send(res, 200, { fixtures: FX.status() }); }
   }
@@ -638,11 +699,11 @@ const server = http.createServer(async (req, res) => {
 });
 
 console.log(`[boot] ALAW ${VERSION} starting on Node ${process.version}`);
-Promise.race([store.init(), new Promise((r) => setTimeout(() => { console.warn("[boot] storage slow to answer, starting anyway"); r(); }, 25000))]).catch((e) => console.error("[boot] storage error:", e.message)).then(() => {
+let bootT; Promise.race([store.init().finally(() => clearTimeout(bootT)), new Promise((r) => { bootT = setTimeout(() => { console.warn("[boot] storage slow to answer, starting anyway"); r(); }, 25000); })]).catch((e) => console.error("[boot] storage error:", e.message)).then(() => {
   FX.refresh(true);
   setInterval(() => FX.refresh(), 30 * 60e3).unref();
-  const warm = async () => { for (const g of groundsList().filter((x) => x.next).slice(0, 8)) { if (!GEO.cached(g.key)) await GEO.nearby(g).catch(() => null); } };
-  setTimeout(warm, 20e3); setInterval(warm, 6 * 3600e3).unref();
+  const warm = async () => { for (const g of groundsList().filter((x) => x.next).slice(0, 8)) { if (!(GEO.cached(g.key) && GEO.cached(g.key).pubs.length)) await GEO.nearby(g).catch(() => null); } };
+  setTimeout(warm, 8e3); setInterval(warm, 15 * 60e3).unref();
   setInterval(() => { const t = now(); for (const c of store.all("checkins")) if (c.at < t - CHECK_MS) store.del("checkins", `${c.pid}:${c.uid}`); }, 30 * 60e3).unref();
   server.listen(PORT, () => console.log(`ALAW ${VERSION} on port ${PORT} (store: ${store.status().mode}, fixtures key: ${FX.status().hasKey ? "yes" : "no"})`));
 });

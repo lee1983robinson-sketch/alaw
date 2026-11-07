@@ -10,6 +10,7 @@ const H = 3600e3, NOW = () => Date.now();
 let AUTH = LS.get("alawAuth"), ADMIN = LS.get("alawAdmin");
 let BOOT = { fixtures: [], me: null, fans: 0, tags: [] }, ME = null, UNREAD = 0;
 let FD = null; // current fixture detail
+let HUBHOME = false, SFILTER = "all";
 let TIMER = null, LTIMER = null, NOTES = 0, ATTACH = null, MAP = null, GAL = [], VIEWSRC = [];
 const APP = $("#app"), NAV = $("#nav");
 
@@ -78,7 +79,7 @@ const ic = (n, s = 20, extra = "") => `<svg aria-hidden="true" width="${s}" heig
 
 /* ---------- nav and shell ---------- */
 function nav(on) {
-  const L = [["", "home", "Feed"], ["games", "cal", "Games"], ["pubs", "pint", "Pubs"], ["photos", "cam", "Photos"], ["me", "user", ME ? "Me" : "Join"]];
+  const L = [["", "home", "Matchday"], ["feed", "chat", "Feed"], ["games", "cal", "Games"], ["pubs", "pint", "Pubs"], ["me", "user", ME ? "Me" : "Join"]];
   NAV.innerHTML = L.map(([r, i, t]) => `<a href="#/${r}" class="${on === r ? "on" : ""}" ${on === r ? 'aria-current="page"' : ""}>${ic(i, 22)}${t}${r === "me" && (UNREAD || NOTES) ? '<span class="dot" aria-label="New activity"></span>' : ""}</a>`).join("");
 }
 function topbar() {
@@ -122,10 +123,10 @@ function route() {
   clearInterval(TIMER); TIMER = null; clearInterval(LTIMER); LTIMER = null; closeSheet(); if (MAP) { try { MAP.remove(); } catch (e) {} MAP = null; }
   const parts = location.hash.replace(/^#\/?/, "").split("/").map(decodeURIComponent);
   const [a, b, c] = parts;
-  curNav = { "": "", games: "games", aways: "games", f: "games", clubs: "", lost: "", pubs: "pubs", g: "pubs", inbox: "inbox", dm: "inbox", me: "me", u: "", lounge: "", admin: "me", rules: "me", photos: "photos", notes: "", p: "" }[a] ?? "";
+  curNav = { "": "", games: "games", aways: "games", f: "games", clubs: "", lost: "", pubs: "pubs", g: "pubs", inbox: "inbox", dm: "inbox", me: "me", u: "", lounge: "", admin: "me", rules: "me", photos: "feed", notes: "", p: "feed", feed: "feed", league: "" }[a] ?? "";
   nav(curNav);
   window.scrollTo(0, 0);
-  const R = { "": pHome, games: pAways, aways: pAways, clubs: pClubs, lost: pLost, f: pFixture, pubs: pPubs, g: pGround, inbox: pInbox, dm: pDM, me: pMe, u: pUser, lounge: pLounge, rules: pRules, admin: pAdmin, photos: pGallery, notes: pNotes, p: pPost };
+  const R = { "": pHub, feed: pHome, league: pLeague, games: pAways, aways: pAways, clubs: pClubs, lost: pLost, f: pFixture, pubs: pPubs, g: pGround, inbox: pInbox, dm: pDM, me: pMe, u: pUser, lounge: pLounge, rules: pRules, admin: pAdmin, photos: pGallery, notes: pNotes, p: pPost };
   (R[a] || pHome)(b, c);
 }
 window.addEventListener("hashchange", route);
@@ -153,14 +154,9 @@ function pHome() {
       <a href="#/me" class="btn y big">Join free · no email needed</a>
       <span class="tiny soft">${BOOT.fans ? `${BOOT.fans} Leeds fan${BOOT.fans === 1 ? "" : "s"} on board` : "Be one of the first on board"}</span>
     </section>`}
-    <div id="live"></div>
-    ${nx ? nextCard(nx) : `<div class="empty">Fixtures will show here as soon as they're out.</div>`}
-    ${other ? `<a href="#/f/${esc(other.id)}" class="card row" style="color:var(--text)">
-      <div class="date"><span>${wk(other.ts)}</span><b>${fmtTime(other.ts)}</b></div>
-      <div class="grow"><div class="kicker">Next ${other.isAway ? "away" : "home"} · ${fmtDay(other.ts)}</div><div style="font-weight:700">${other.isAway ? "at " + esc(short(other.home.name)) : "Leeds v " + esc(short(other.away.name))}</div><div class="tiny muted">${other.going} going · ${other.isAway ? "map, pubs, lifts, tickets" : "pre-match pubs, meet-ups"}</div></div>
-    </a>` : ""}
+    <div><div class="kicker">Posts, photos and polls from Leeds fans</div><h1 class="h1">The feed</h1></div>
     <div id="extras" class="col" style="gap:16px"></div>
-    <div class="tabs" aria-label="Quick links">${[["#/lounge", "chat", "The Lounge"], ["#/photos", "cam", "Gallery"], ["#/clubs", "user", "Supporters' clubs"], ["#/lost", "pin", "Lost & found"], ["#/rules", "shield", "House rules"]].map(([h, i, t]) => `<a class="tab" href="${h}" style="gap:6px">${ic(i, 16, 'style="color:var(--yellow)"')}${t}</a>`).join("")}</div>
+    <div class="tabs" aria-label="Quick links">${[["#/photos", "cam", "Gallery"], ["#/league", "medal", "Prediction league"], ["#/lounge", "chat", "The Lounge"], ["#/clubs", "user", "Supporters' clubs"], ["#/lost", "pin", "Lost & found"], ["#/rules", "shield", "House rules"]].map(([h, i, t]) => `<a class="tab" href="${h}" style="gap:6px">${ic(i, 16, 'style="color:var(--yellow)"')}${t}</a>`).join("")}</div>
     ${ME ? `<form data-form="newpost" class="card col" style="gap:10px">
       <div class="row" style="align-items:flex-start">${av(ME.nick)}<label class="sr" for="np">Write a post</label><textarea class="f grow" id="np" name="text" maxlength="1000" placeholder="What's happening, ${esc(ME.nick)}?" style="min-height:52px"></textarea></div>
       <div id="npPrev"></div>
@@ -208,7 +204,7 @@ async function loadFeed(first) {
     const j = await api("/feed" + before);
     if (first) {
       drawExtras(j);
-      if (j.live && j.live.fid) {
+      if (j.live && j.live.fid && $("#live")) {
         const f = BOOT.fixtures.find((x) => x.id === j.live.fid);
         const draw = (L) => { const b = $("#live"); if (b && f) b.innerHTML = liveHtml(f, L, true); };
         draw(j.live);
@@ -264,6 +260,16 @@ async function pPost(id) {
 }
 const commentHtml = (c) => `<div class="msg" id="c-${esc(c.id)}">${av(c.nick)}<div class="bub" style="max-width:86%"><div class="who"><a href="#/u/${esc(c.uid)}">${esc(c.nick)}</a><span class="muted" style="font-weight:400">${ago(c.at)}</span><button class="opt" data-act="opt" data-type="comment" data-id="${esc(c.id)}" data-uid="${esc(c.uid)}" aria-label="Comment options">•••</button></div>${esc(c.text)}</div></div>`;
 
+/* ---------- prediction league ---------- */
+async function pLeague() {
+  APP.innerHTML = `<div class="spin">Loading the table…</div>`;
+  let j; try { j = await api("/league"); } catch (e) { APP.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  APP.innerHTML = `<div class="col" style="gap:14px">${backBtn("javascript:history.back()")}<div><div class="kicker">${j.players} fan${j.players === 1 ? "" : "s"} · 3 pts exact score · 1 pt result</div><h1 class="h1">Prediction league</h1></div>
+    ${j.me ? `<div class="hero" style="padding:14px;flex-direction:row;align-items:center;gap:12px"><span class="score" style="font-size:34px">${j.me.rank}${["th", "st", "nd", "rd"][(j.me.rank % 100 > 10 && j.me.rank % 100 < 14) ? 0 : j.me.rank % 10 < 4 ? j.me.rank % 10 : 0]}</span><div class="grow"><b>You</b><div class="tiny soft">${j.me.pts} pts · ${j.me.exact} exact · ${j.me.played} games</div></div></div>` : ""}
+    ${j.top.length ? `<div class="card col" style="gap:0;padding:6px 14px">${j.top.map((r) => `<a href="#/u/${esc(r.uid)}" class="fxrow" style="color:var(--text);${ME && r.uid === ME.id ? "background:rgba(255,205,0,.08);margin:0 -14px;padding-left:14px;padding-right:14px" : ""}"><span class="score" style="width:34px;font-size:20px">${r.rank}</span>${av(r.nick)}<span class="grow" style="font-weight:600">${esc(r.nick)}</span><span class="tiny muted">${r.exact} exact</span><b style="width:44px;text-align:right">${r.pts}</b></a>`).join("")}</div>` : `<div class="empty">The table starts after the first game with predictions. Open the next game and predict the score.</div>`}
+  </div>`;
+}
+
 /* ---------- notifications ---------- */
 async function pNotes() {
   if (!ME) { location.hash = "#/me"; return; }
@@ -313,12 +319,18 @@ function pAways(filter) {
 }
 
 /* ---------- fixture page ---------- */
-const TABS = [["info", "Info"], ["map", "Map & pubs"], ["chat", "Chat"], ["rate", "Ratings"], ["meet", "Meet-ups"], ["watch", "Watch elsewhere"], ["lifts", "Lifts"], ["tickets", "Tickets"], ["photos", "Photos"]];
-async function pFixture(id, tab = "info") {
-  if (!FD || FD.fixture.id !== id) { APP.innerHTML = `<div class="spin">Loading the game…</div>`; }
+const TABS = [["hub", "Matchday"], ["map", "Map & pubs"], ["chat", "Chat"], ["rate", "Ratings"], ["info", "Team news & tips"], ["meet", "Meet-ups"], ["lifts", "Lifts"], ["tickets", "Tickets"], ["watch", "Watch elsewhere"], ["photos", "Photos"]];
+function pHub() {
+  const nx = BOOT.fixtures.find((f) => f.ts > NOW() - 3 * H);
+  if (!nx) return pHome();
+  return pFixture(nx.id, "hub", true);
+}
+async function pFixture(id, tab = "hub", home = false) {
+  HUBHOME = !!home;
+  if (!FD || FD.fixture.id !== id) { APP.innerHTML = `${home ? topbar() : ""}<div class="spin">Loading the matchday…</div>`; }
   try { FD = await api("/f/" + enc(id)); } catch (e) { APP.innerHTML = `<div class="col">${backBtn("#/games")}<div class="empty">${esc(e.message)}</div></div>`; return; }
   if (tab === "pubs") tab = "map";
-  drawFixture(tab);
+  drawFixture(tab, home);
   if (tab === "chat") startChat(id);
   const f = FD.fixture;
   if (FD.live || (f.ts - NOW() < 15 * 60e3 && NOW() - f.ts < 165 * 60e3)) {
@@ -326,31 +338,115 @@ async function pFixture(id, tab = "info") {
     LTIMER = setInterval(async () => { try { const r = await api("/live/" + enc(f.id)); FD.live = r.live; const b = $("#livebox"); if (b) b.innerHTML = liveHtml(f, r.live, false); } catch (e) {} }, 60e3);
   }
 }
-function drawFixture(tab) {
+function drawFixture(tab, home = HUBHOME) {
   const D = FD, f = D.fixture;
+  const tabHref = (k) => (home && k === "hub" ? "#/" : `#/f/${esc(f.id)}/${k}`);
   const showRate = D.rate && (D.rate.open || D.rate.voters);
   const counts = { rate: D.rate ? D.rate.voters : 0, watch: D.watch.length, chat: D.chat.length, map: D.pubs.reduce((a, p) => a + p.here, 0) ? D.pubs.reduce((a, p) => a + p.here, 0) + " here" : D.pubs.length, meet: D.meets.length, lifts: D.lifts.filter((l) => !l.closed).length, tickets: D.tickets.filter((t) => !t.closed).length, photos: D.photos.length };
-  APP.innerHTML = `<div class="col" style="gap:16px">
-    <div class="row" style="justify-content:space-between">${backBtn("#/games", "Back to fixtures")}<button class="ibtn" data-act="share" aria-label="Share this game">${ic("share")}</button></div>
-    <div class="col" style="gap:8px">
-      <div class="kicker">${esc(f.league || "")}${f.league ? " · " : ""}${fmtDay(f.ts)} ${fmtTime(f.ts)}${until(f.ts) ? " · " + esc(until(f.ts)) : ""}</div>
+  const live = D.live && !["FT", "AET", "PEN", "NS"].includes(D.live.status);
+  counts.hub = D.stream.length;
+  APP.innerHTML = `${home ? topbar() : `<div class="row" style="justify-content:space-between;margin-bottom:12px">${backBtn("#/games", "Back to fixtures")}<button class="ibtn" data-act="share" aria-label="Share this game">${ic("share")}</button></div>`}
+  <div class="col" style="gap:16px">
+    ${home && !ME ? `<a href="#/me" class="hero" style="padding:14px 16px;flex-direction:row;align-items:center;gap:12px;color:var(--text)"><div class="grow"><div style="font-weight:800;font-size:17px">Every Leeds matchday. One place.</div><div class="tiny soft">Lifts, spare tickets, meet-ups, predictions, who's in which pub. Free, no email.</div></div><span class="btn y">Join</span></a>` : ""}
+    <section class="fxhero col">
+      <div class="kicker">${home ? (live ? "On now" : "Next game") + " · " : ""}${esc(f.league || "")}${f.league ? " · " : ""}${fmtDay(f.ts)} ${fmtTime(f.ts)}${until(f.ts) && !live ? " · " + esc(until(f.ts)) : ""}</div>
       <h1 class="h1" style="font-size:42px">${titleOf(f)}</h1>
-      <div class="soft small row" style="gap:6px">${ic("pin", 16)}${esc([f.venue.name, f.venue.city].filter(Boolean).join(", ") || "Venue to be confirmed")} ${f.score && !(D.live && !["FT", "AET", "PEN", "NS"].includes(D.live.status)) ? resultOf(f) : ""}</div>
-    </div>
-    <div id="livebox">${liveHtml(f, D.live, false)}</div>
-    <div class="stats">
-      <div class="stat"><b>${f.going}</b><span>${past(f) ? "went" : "going"}</span></div>
-      <div class="stat"><b>${D.meets.length}</b><span>meet-ups</span></div>
-      <div class="stat"><b>${D.photos.length}</b><span>photos</span></div>
-    </div>
-    ${goingBtn(f, true)}
-    <div class="tabs" role="tablist" aria-label="Away day sections">${TABS.filter(([k]) => k !== "rate" || showRate).map(([k, t]) => `<a role="tab" aria-selected="${tab === k}" class="tab ${tab === k ? "on" : ""}" href="#/f/${esc(f.id)}/${k}">${t}${counts[k] ? ` · ${counts[k]}` : ""}</a>`).join("")}</div>
-    <div id="tab" class="col">${(TABV[tab] || TABV.info)(D)}</div>
-  </div>`;
+      <div class="soft small row" style="gap:6px">${ic("pin", 16)}${esc([f.venue.name, f.venue.city].filter(Boolean).join(", ") || "Venue to be confirmed")} ${f.score && !live ? resultOf(f) : ""}</div>
+      <div id="livebox">${liveHtml(f, D.live, false)}</div>
+      <div class="row" style="gap:10px;flex-wrap:wrap">${facesHtml(D.who, f.going, past(f))}${goingBtn(f)}</div>
+    </section>
+    <div class="tabs" role="tablist" aria-label="Matchday sections">${TABS.filter(([k]) => k !== "rate" || showRate).map(([k, t]) => `<a role="tab" aria-selected="${tab === k}" class="tab ${tab === k ? "on" : ""}" href="${tabHref(k)}">${t}${counts[k] && k !== "hub" ? ` · ${counts[k]}` : ""}</a>`).join("")}</div>
+    <div id="tab" class="col">${(TABV[tab] || TABV.hub)(D)}</div>
+  </div>
+  ${tab !== "chat" ? `<a class="fab" href="#/f/${esc(f.id)}/chat">${ic("chat", 18)}Chat${D.chat.length ? " · " + D.chat.length : ""}</a>` : ""}`;
   if (tab === "chat") { const c = $("#chatlist"); if (c) window.scrollTo(0, document.body.scrollHeight); }
-  if (tab === "map") drawMap("map", D.map, D.pubs, D.meets).catch(() => {});
+  if (tab === "map" || tab === "hub") drawMap("map", D.map, D.pubs, D.meets).catch(() => {});
+}
+function facesHtml(who, n, wasPast) {
+  const W = (who || []).slice(0, 7);
+  return `<a href="#/f/${esc(FD.fixture.id)}/info" class="row grow" style="gap:10px;color:var(--text);min-height:44px"><span class="faces">${W.map((w) => av(w.nick)).join("") || `<span class="av" style="background:var(--card2);color:var(--muted)">${ic("user", 16)}</span>`}</span><span class="small"><b style="font-size:16px">${n}</b> ${wasPast ? "went" : "going"}${W.length ? `<span class="tiny muted" style="display:block">${W.slice(0, 3).map((w) => esc(w.nick)).join(", ")}${n > 3 ? " and others" : ""}</span>` : ""}</span></a>`;
+}
+const TILES = [
+  ["liftneed", "car", "Need a lift", "#FFD36B", "#3A2E0B"], ["liftoffer", "car", "Got a spare seat", "#7BD88F", "#143222"],
+  ["ticketspare", "ticket", "Spare ticket", "#8FB8FF", "#15264A"], ["ticketwant", "ticket", "Need a ticket", "#C9A7FF", "#2A1E48"],
+  ["meet", "pin", "Where we meeting?", "#FF9F7A", "#3A1C14"], ["predict", "medal", "Predict the score", "#FFCD00", "#3A3000"],
+];
+function tilesHtml(D) {
+  const L = D.lifts.filter((l) => !l.closed), T = D.tickets.filter((t) => !t.closed), P = D.preds;
+  const sub = { liftneed: `${L.filter((l) => l.kind === "need").length} asking`, liftoffer: `${L.filter((l) => l.kind !== "need").reduce((a, l) => a + l.seats, 0)} seats offered`,
+    ticketspare: `${T.filter((t) => t.kind !== "wanted").length} available`, ticketwant: `${T.filter((t) => t.kind === "wanted").length} looking`,
+    meet: `${D.meets.length} meet-up${D.meets.length === 1 ? "" : "s"}`, predict: P.mine ? `You: ${P.mine.h}-${P.mine.a}` : P.locked ? "Closed" : `${P.n} in` };
+  return `<div class="tiles">${TILES.map(([k, i, t, c, bg]) => `<button class="tile" data-act="quick" data-k="${k}"><span class="ti" style="background:${bg};color:${c}">${ic(i, 20)}</span><b>${t}</b><span class="s">${sub[k]}</span></button>`).join("")}</div>`;
+}
+function predsHtml(D) {
+  const P = D.preds, f = D.fixture, opp = esc(short(f.isAway ? f.home.name : f.away.name));
+  const line = (h, a) => `${esc(short(f.home.name))} ${h}-${a} ${esc(short(f.away.name))}`;
+  return `<section class="card col" style="gap:10px">
+    <div class="row"><div class="kicker grow">Fans predict · ${P.n} prediction${P.n === 1 ? "" : "s"}</div><a href="#/league" class="tiny">League table</a></div>
+    ${P.n ? `<div class="predbar" role="img" aria-label="Leeds win ${P.win}%, draw ${P.draw}%, ${opp} win ${P.loss}%"><span style="width:${P.win}%;background:var(--yellow)"></span><span style="width:${P.draw}%;background:#8A94A8"></span><span style="width:${P.loss}%;background:var(--bad)"></span></div>
+      <div class="row tiny" style="justify-content:space-between"><span><b class="y">Leeds ${P.win}%</b></span><span>Draw ${P.draw}%</span><span style="color:var(--bad)">${opp} ${P.loss}%</span></div>
+      ${P.top.length ? `<div class="chips">${P.top.map((t, i) => `<span class="chip ${i ? "" : "mine"}">${esc(t.s)} · ${t.n}</span>`).join("")}<span class="tiny muted" style="align-self:center">most picked</span></div>` : ""}` : `<div class="small soft">${P.locked ? "No predictions for this one." : "Nobody's predicted yet. Go first."}</div>`}
+    ${P.mine ? `<div class="row"><span class="grow small">Your prediction: <b>${line(P.mine.h, P.mine.a)}</b>${P.mine.pts != null ? ` · <span class="chip ${P.mine.pts ? "good" : ""}">${P.mine.pts} pt${P.mine.pts === 1 ? "" : "s"}</span>` : ""}</span>${P.locked ? "" : `<button class="btn" data-act="quick" data-k="predict">Change</button>`}</div>` : P.locked ? "" : `<button class="btn y block" data-act="quick" data-k="predict">Predict the score</button>`}
+    ${P.done && P.exact.length ? `<div class="tiny soft">Spot on: ${P.exact.map(esc).join(", ")}</div>` : ""}
+  </section>`;
+}
+function whereHtml(D) {
+  const hot = D.pubs.filter((p) => p.here).sort((a, b) => b.here - a.here).slice(0, 3);
+  const M = D.map;
+  return `<section class="card col" style="gap:10px">
+    <div class="row"><h2 class="h2 grow" style="font-size:22px">Where's everyone?</h2><a href="#/f/${esc(D.fixture.id)}/map" class="tiny">Full map &amp; pubs</a></div>
+    ${M && M.center ? `<div id="map" class="map" style="height:230px" role="region" aria-label="Map of pubs, pins and meet-ups"><div class="spin">Loading map…</div></div>` : `<div class="small soft">Finding pubs around ${esc(D.fixture.venue.name || "the ground")}…</div>`}
+    ${hot.length ? hot.map((p) => `<a href="#/f/${esc(D.fixture.id)}/map" class="row" style="color:var(--text)"><span class="pulse" aria-hidden="true"></span><span class="grow" style="font-weight:600">${esc(p.name)}</span><span class="chip warn">${p.here} here</span></a>`).join("") : `<div class="tiny muted">Nobody's checked in anywhere yet. Be the first.</div>`}
+    <div class="row" style="gap:8px"><button class="btn y grow" data-act="pubpick">${ic("pint", 18)}I'm at a pub</button><button class="btn grow" data-act="droppin" data-fid="${esc(D.fixture.id)}">${ic("pin", 18)}Drop a pin</button></div>
+  </section>`;
+}
+const SF = [["all", "Everything"], ["lifts", "Lifts"], ["tickets", "Tickets"], ["meet", "Meet-ups"], ["pubs", "Pubs"], ["preds", "Predictions"], ["photos", "Photos"], ["posts", "Posts"]];
+const SFT = { lifts: ["lift", "liftneed"], tickets: ["ticket", "ticketwant"], meet: ["meet", "pin", "watch"], pubs: ["checkin"], preds: ["pred"], photos: ["photo"], posts: ["post", "tip"] };
+function streamHtml(list, k = "all") {
+  const L = (list || []).filter((x) => k === "all" || (SFT[k] || []).includes(x.type));
+  return L.map(streamItem).join("") || `<div class="empty">${k === "all" ? "Nothing yet for this game. Use the buttons above: offer a lift, post a spare ticket, set up a meet-up or predict the score." : "Nothing here yet."}</div>`;
+}
+const SIC = { lift: ["car", "#7BD88F", "#143222"], liftneed: ["car", "#FFD36B", "#3A2E0B"], ticket: ["ticket", "#8FB8FF", "#15264A"], ticketwant: ["ticket", "#C9A7FF", "#2A1E48"], meet: ["pin", "#FF9F7A", "#3A1C14"], pin: ["pin", "#FF8F80", "#3A1C1A"], watch: ["pint", "#6FD3E0", "#0F3036"], checkin: ["pint", "#FFCD00", "#3A3000"], pred: ["medal", "#C9A7FF", "#2A1E48"], photo: ["cam", "#C9D2E1", "#1E2A44"], post: ["chat", "#C9D2E1", "#1E2A44"], tip: ["train", "#7BD88F", "#143222"] };
+function streamItem(x) {
+  const f = FD.fixture, mine = ME && x.uid === ME.id;
+  const who = `<a href="#/u/${esc(x.uid)}" style="color:var(--text);font-weight:700">${mine ? "You" : esc(x.nick)}</a>`;
+  const V = (they, you) => (mine ? you : they);
+  const msg = (label) => (mine ? "" : `<a class="btn y" href="#/dm/${esc(x.uid)}">${label}</a>`);
+  const sorted = (type) => (mine ? `<button class="btn" data-act="close" data-type="${type}" data-id="${esc(x.id)}" data-on="${x.closed ? 0 : 1}">${x.closed ? "Reopen" : "Mark sorted"}</button>` : "");
+  const walk = x.lat != null ? `<a class="btn" href="${dirUrl(x.lat, x.lng)}" target="_blank" rel="noopener">${ic("pin", 16)}Walk there</a>` : "";
+  const join = (lbl) => `<button class="btn ${x.joined ? "on" : "y"}" data-act="meetjoin" data-id="${esc(x.id)}" data-on="${x.joined ? 0 : 1}" aria-pressed="${!!x.joined}">${x.joined ? ic("check", 16) + "In · " + x.count : lbl + (x.count ? " · " + x.count : "")}</button>`;
+  let line = "", extra = "", acts = "";
+  switch (x.type) {
+    case "liftneed": line = `${who} ${V("needs", "need")} a lift from <b>${esc(x.from)}</b>${x.seats > 1 ? ` for ${x.seats}` : ""}`; extra = x.notes; acts = x.closed ? '<span class="chip">Sorted</span>' : msg("I can take you") + sorted("lift"); break;
+    case "lift": line = `${who} ${V("has", "have")} <b>${x.seats} spare seat${x.seats === 1 ? "" : "s"}</b> from <b>${esc(x.from)}</b>${x.depart ? ` · leaving ${esc(x.depart)}` : ""}`; extra = [x.cost ? `£${x.cost} each towards petrol` : "", x.back ? `back by ${x.back}` : "", x.notes].filter(Boolean).join(" · "); acts = x.closed ? '<span class="chip">Full</span>' : msg("Ask for a seat") + sorted("lift"); break;
+    case "ticket": line = `${who} ${V("has", "have")} <b>${x.qty} spare ticket${x.qty === 1 ? "" : "s"}</b>${x.area ? " · " + esc(x.area) : ""}`; extra = x.notes; acts = x.closed ? '<span class="chip">Sorted</span>' : msg("Message") + sorted("ticket"); break;
+    case "ticketwant": line = `${who} ${V("needs", "need")} <b>${x.qty} ticket${x.qty === 1 ? "" : "s"}</b>${x.area ? " · " + esc(x.area) : ""}`; extra = x.notes; acts = x.closed ? '<span class="chip">Sorted</span>' : msg("I've got one") + sorted("ticket"); break;
+    case "meet": line = `${who} ${V("is", "are")} meeting at <b>${esc(x.where)}</b>${x.time ? " from " + esc(x.time) : ""}`; extra = [x.title, x.details].filter(Boolean).join(" · "); acts = join("Count me in") + walk + (x.first ? '<span class="chip good">First-timers welcome</span>' : ""); break;
+    case "pin": line = `${who} dropped a pin: <b>${esc(x.title)}</b>`; extra = `${x.where}${x.expires ? ` · ${Math.max(0, Math.round((x.expires - NOW()) / 6e4))} mins left` : ""}`; acts = walk + join("On my way"); break;
+    case "watch": line = `${who} ${V("is", "are")} watching at <b>${esc(x.where)}</b>${x.place ? ", " + esc(x.place) : ""}`; extra = x.details; acts = join("I'll be there"); break;
+    case "checkin": line = `${who} ${V("is", "are")} at <b>${esc(x.pub)}</b>`; acts = `<button class="btn" data-act="checkin" data-id="${esc(x.pid)}" data-on="1">I'm there too</button><a class="btn" href="#/f/${esc(f.id)}/map">Map</a>`; break;
+    case "pred": line = `${who} ${V("predicts", "predicted")} <b>${esc(short(f.home.name))} ${x.h}-${x.a} ${esc(short(f.away.name))}</b>`; break;
+    case "photo": line = `${who} posted a photo`; extra = x.text; return `<article class="sitem card col" style="gap:8px">${sHead(x, line)}${x.img ? `<a class="pimg" href="#/p/${esc(x.id)}"><img src="/img/${esc(x.img)}.jpg" alt="${esc(x.text || "Photo")}" loading="lazy" style="width:100%;max-height:360px;object-fit:cover;border-radius:12px"></a>` : ""}${extra ? `<div class="small soft">${esc(extra)}</div>` : ""}<div class="row" style="gap:8px">${cheerBtn(x)}<a class="chip" style="min-height:32px" href="#/p/${esc(x.id)}">Comment${x.comments ? " · " + x.comments : ""}</a></div></article>`;
+    case "post": case "tip": line = `${who} ${x.type === "tip" ? "shared a tip" + (x.tag ? ": " + esc(x.tag) : "") : "posted"}`; extra = x.text; acts = cheerBtn(x) + (x.type === "post" ? `<a class="chip" style="min-height:32px" href="#/p/${esc(x.id)}">Comment${x.comments ? " · " + x.comments : ""}</a>` : ""); break;
+  }
+  return `<article class="sitem card col" style="gap:8px;${x.closed ? "opacity:.6" : ""}">${sHead(x, line)}${extra ? `<div class="small soft" style="white-space:pre-wrap;line-height:1.45">${esc(extra)}</div>` : ""}${acts ? `<div class="row" style="gap:8px;flex-wrap:wrap">${acts}</div>` : ""}</article>`;
+}
+function sHead(x, line) {
+  const [i, c, bg] = SIC[x.type] || SIC.post;
+  const optType = { lift: "lift", liftneed: "lift", ticket: "ticket", ticketwant: "ticket", meet: "meet", pin: "meet", watch: "meet", photo: "post", post: "post", tip: "post" }[x.type];
+  return `<div class="row" style="align-items:flex-start;gap:10px"><span class="sic" style="background:${bg};color:${c}">${ic(i, 18)}</span><div class="grow small" style="line-height:1.45">${line}<div class="tiny muted">${ago(x.at)}</div></div>${optType ? `<button class="opt" data-act="opt" data-type="${optType}" data-id="${esc(x.id)}" data-uid="${esc(x.uid)}" aria-label="Options">•••</button>` : ""}</div>`;
 }
 const TABV = {
+  hub(D) {
+    return `${tilesHtml(D)}
+    ${predsHtml(D)}
+    ${whereHtml(D)}
+    <section class="col" style="gap:10px"><h2 class="h2">What's happening</h2>
+      <div class="tabs" role="tablist" aria-label="Filter">${SF.map(([k, t]) => `<button role="tab" aria-selected="${SFILTER === k}" class="tab ${SFILTER === k ? "on" : ""}" data-act="sfilter" data-k="${k}">${t}</button>`).join("")}</div>
+      <div id="stream" class="col" style="gap:10px">${streamHtml(D.stream, SFILTER)}</div>
+    </section>
+    ${teamNews(D)}`;
+  },
   info(D) {
     const f = D.fixture, q = enc([f.venue.name, f.venue.city].filter(Boolean).join(" "));
     return `<div class="board col" style="gap:0">
@@ -412,6 +508,11 @@ const TABV = {
   },
   rate(D) { return rateHtml(D); },
   lifts(D) {
+    return `<div class="row" style="gap:8px"><button class="btn y grow" data-act="quick" data-k="liftneed">I need a lift</button><button class="btn y grow" data-act="quick" data-k="liftoffer">I've got a seat</button></div>
+    <p class="note">Lifts are petrol money only. Sort the details by message, meet somewhere public, and tell someone who you're travelling with.</p>
+    <div class="col" style="gap:10px">${streamHtml(D.stream, "lifts")}</div>`;
+  },
+  liftsOld(D) {
     return `${D.lifts.map((l) => `<article class="card col" style="gap:10px;${l.closed ? "opacity:.6" : ""}">
       <div class="row">${av(l.nick)}<div class="grow"><a href="#/u/${esc(l.uid)}" style="color:var(--text);font-weight:700">${esc(l.nick)}</a><div class="tiny muted">${l.given} lift${l.given === 1 ? "" : "s"} offered on ALAW</div></div>
       <span class="score">${l.closed ? "Full" : `${l.seats} seat${l.seats === 1 ? "" : "s"}`}</span>
@@ -431,6 +532,11 @@ const TABV = {
       <button class="btn y">Offer lift</button></form>`;
   },
   tickets(D) {
+    return `<div class="rule">${ic("shield", 16, 'style="vertical-align:-3px"')} Tickets only change hands through Leeds United's official ticket transfer or exchange. No money changes hands on ALAW, and no touting.</div>
+    <div class="row" style="gap:8px"><button class="btn y grow" data-act="quick" data-k="ticketspare">I've got a spare</button><button class="btn y grow" data-act="quick" data-k="ticketwant">I need a ticket</button></div>
+    <div class="col" style="gap:10px">${streamHtml(D.stream, "tickets")}</div>`;
+  },
+  ticketsOld(D) {
     return `<div class="rule">${ic("shield", 16, 'style="vertical-align:-3px"')} Tickets only change hands through Leeds United's official ticket transfer or exchange. No money changes hands on ALAW, and no touting.</div>
     ${D.tickets.map((t) => `<article class="card col" style="gap:10px;${t.closed ? "opacity:.6" : ""}">
       <div class="row"><div class="grow"><div class="h2" style="font-size:22px">${t.kind === "wanted" ? "Wanted" : "Spare"}: ${t.qty} ticket${t.qty === 1 ? "" : "s"}</div><div class="small soft">${esc(t.area || "Away end")}</div></div>
@@ -870,6 +976,53 @@ function viewer(i, src) {
 
 /* ---------- actions ---------- */
 const ACT = {
+  sfilter(d) { SFILTER = d.k; const el = $("#stream"); if (el && FD) el.innerHTML = streamHtml(FD.stream, SFILTER); document.querySelectorAll('[data-act="sfilter"]').forEach((b) => { const on = b.dataset.k === SFILTER; b.classList.toggle("on", on); b.setAttribute("aria-selected", on); }); },
+  quick(d) {
+    if (needJoin()) return; if (!FD) return;
+    const f = FD.fixture, fid = esc(f.id), K = d.k;
+    const close = `<button type="button" class="btn" data-act="close-sheet">Cancel</button>`;
+    const forms = {
+      liftneed: `<h2 class="h2" style="font-size:22px">Need a lift</h2><form data-form="quicklift" class="col"><input type="hidden" name="fid" value="${fid}"><input type="hidden" name="kind" value="need">
+        <div><label class="l" for="qf">Pick-up town or area (not your address)</label><input class="f" id="qf" name="from" maxlength="40" placeholder="Wakefield" required></div>
+        <div><label class="l" for="qs">How many of you?</label><select class="f" id="qs" name="seats">${[1, 2, 3, 4].map((n) => `<option>${n}</option>`).join("")}</select></div>
+        <div><label class="l" for="qn">Anything else</label><input class="f" id="qn" name="notes" maxlength="200" placeholder="Happy to chip in for petrol"></div>
+        <button class="btn y big">Ask for a lift</button>${close}</form>`,
+      liftoffer: `<h2 class="h2" style="font-size:22px">Got a spare seat</h2><form data-form="quicklift" class="col"><input type="hidden" name="fid" value="${fid}"><input type="hidden" name="kind" value="offer">
+        <div><label class="l" for="qf">Setting off from (town or area)</label><input class="f" id="qf" name="from" maxlength="40" placeholder="Wakefield" required></div>
+        <div class="row"><div class="grow"><label class="l" for="qd">Leaving</label><input class="f" id="qd" name="depart" type="time"></div><div class="grow"><label class="l" for="qs">Seats</label><select class="f" id="qs" name="seats">${[1, 2, 3, 4, 5, 6].map((n) => `<option>${n}</option>`).join("")}</select></div><div class="grow"><label class="l" for="qc">£ petrol</label><input class="f" id="qc" name="cost" type="number" min="0" max="60" inputmode="numeric" placeholder="0"></div></div>
+        <label class="check"><input type="checkbox" name="share" required> Petrol money only, no profit, and I'm insured.</label>
+        <button class="btn y big">Offer seats</button>${close}</form>`,
+      ticketspare: `<h2 class="h2" style="font-size:22px">Spare ticket</h2><form data-form="quickticket" class="col"><input type="hidden" name="fid" value="${fid}"><input type="hidden" name="kind" value="spare">
+        <div class="row"><div class="grow"><label class="l" for="qq">How many</label><select class="f" id="qq" name="qty">${[1, 2, 3, 4].map((n) => `<option>${n}</option>`).join("")}</select></div><div class="grow" style="flex:2"><label class="l" for="qa">Area or type</label><input class="f" id="qa" name="area" maxlength="60" placeholder="Away end, adult"></div></div>
+        <label class="check"><input type="checkbox" name="official" required> It'll go through the club's official ticket transfer or exchange, not sold privately.</label>
+        <button class="btn y big">Post spare</button>${close}</form>`,
+      ticketwant: `<h2 class="h2" style="font-size:22px">Need a ticket</h2><form data-form="quickticket" class="col"><input type="hidden" name="fid" value="${fid}"><input type="hidden" name="kind" value="wanted">
+        <div class="row"><div class="grow"><label class="l" for="qq">How many</label><select class="f" id="qq" name="qty">${[1, 2, 3, 4].map((n) => `<option>${n}</option>`).join("")}</select></div><div class="grow" style="flex:2"><label class="l" for="qa">Notes</label><input class="f" id="qa" name="notes" maxlength="200" placeholder="Member with away points"></div></div>
+        <label class="check"><input type="checkbox" name="official" required> I'll only take one through the club's official transfer or exchange.</label>
+        <button class="btn y big">Post</button>${close}</form>`,
+      meet: `<h2 class="h2" style="font-size:22px">Where we meeting?</h2><form data-form="meet" class="col"><input type="hidden" name="fid" value="${fid}">
+        <div><label class="l" for="qw">Where?</label><input class="f" id="qw" name="where" maxlength="80" placeholder="The Old Peacock, beer garden" required></div>
+        <div class="row"><div class="grow"><label class="l" for="qt">From</label><input class="f" id="qt" name="time" type="time"></div><div class="grow" style="flex:2"><label class="l" for="qti">What is it?</label><input class="f" id="qti" name="title" maxlength="60" value="Pints before the game" required></div></div>
+        <label class="check"><input type="checkbox" name="first" checked> First-timers welcome</label>
+        <label class="check"><input type="checkbox" name="useloc"> I'm there now: pin my spot on the map</label>
+        <button class="btn y big">Post meet-up</button>${close}</form>`,
+      predict: (() => { const m = FD.preds.mine || { h: f.isAway ? 1 : 2, a: f.isAway ? 2 : 1 }; return `<h2 class="h2" style="font-size:22px">Predict the score</h2><p class="note">3 points for the exact score, 1 for the right result. Locks at kick-off.</p>
+        <form data-form="predict" class="col" style="gap:16px"><input type="hidden" name="fid" value="${fid}">
+        ${[["h", f.home.name, m.h], ["a", f.away.name, m.a]].map(([k, n, v]) => `<div class="row"><b class="grow" style="font-size:18px">${esc(short(n))}</b><div class="stepper"><button type="button" class="ibtn" data-act="step" data-k="${k}" data-d="-1" aria-label="One fewer goal for ${esc(short(n))}">−</button><output id="st-${k}" aria-live="polite">${v}</output><input type="hidden" name="${k}" value="${v}"><button type="button" class="ibtn" data-act="step" data-k="${k}" data-d="1" aria-label="One more goal for ${esc(short(n))}">+</button></div></div>`).join("")}
+        <button class="btn y big">Lock it in</button>${close}</form>`; })(),
+    };
+    if (K === "predict" && FD.preds.locked) { toast("Predictions closed at kick-off."); return; }
+    sheet(forms[K] || "");
+  },
+  step(d) { const inp = document.querySelector(`input[name="${d.k}"]`), out = document.getElementById("st-" + d.k); if (!inp) return; const v = Math.max(0, Math.min(15, +inp.value + +d.d)); inp.value = v; out.textContent = v; },
+  pubpick() {
+    if (needJoin()) return; if (!FD) return;
+    const P = [...FD.pubs].sort((a, b) => (a.d ?? 9e9) - (b.d ?? 9e9)).slice(0, 15);
+    if (!P.length) { toast("No pubs found near this ground yet."); return; }
+    sheet(`<h2 class="h2" style="font-size:22px">Which pub are you in?</h2><p class="note">Leeds fans will see you're there for the next 3 hours.</p>
+      ${P.map((p) => `<button class="btn block" style="justify-content:space-between" data-act="checkin" data-id="${esc(p.id)}" data-on="1"><span>${esc(p.name)}</span><span class="tiny muted">${p.here ? `<b class="y">${p.here} here</b> · ` : ""}${p.walk != null ? p.walk + " min" : ""}</span></button>`).join("")}
+      <button class="btn" data-act="close-sheet">Cancel</button>`);
+  },
   async pollvote(d) {
     if (needJoin()) return;
     const j = await api("/poll/vote", { id: d.id, opt: +d.i }); const el = document.getElementById("poll-" + d.id); if (el) el.outerHTML = pollHtml(j.poll);
@@ -921,7 +1074,7 @@ const ACT = {
     const p = curPubs().find((x) => x.id === d.id); if (!p) return;
     sheet(`<h2 class="h2" style="font-size:20px">Tag ${esc(p.name)}</h2><p class="note">Tap the ones that are true today.</p><div class="chips">${(BOOT.tags || []).map((t) => { const m = p.tags.find((x) => x.t === t); const on = !!(m && m.mine); return `<button class="chip ${on ? "mine" : ""}" style="min-height:40px" data-act="pubtag" data-id="${esc(p.id)}" data-tag="${esc(t)}" data-on="${on ? 0 : 1}" aria-pressed="${on}">${esc(t)}</button>`; }).join("")}</div><button class="btn" data-act="close-sheet">Done</button>`);
   },
-  async meetjoin(d) { if (needJoin()) return; const j = await api("/meet/join", { id: d.id, on: d.on === "1" }); const i = FD.meets.findIndex((m) => m.id === d.id); if (i >= 0) FD.meets[i] = j.meet; reDraw(); },
+  async meetjoin(d) { if (needJoin()) return; await api("/meet/join", { id: d.id, on: d.on === "1" }); toast(d.on === "1" ? "You're in. See you there." : "Taken you off."); reload(); },
   async close(d) { await api("/close", { type: d.type, id: d.id, on: d.on === "1" }); toast(d.on === "1" ? "Marked. Nice one." : "Reopened."); if (d.type === "lost") pLost(); else reload(); },
   view(d) { viewer(+d.i, d.src); },
   async feedmore() { await loadFeed(false); },
@@ -941,7 +1094,8 @@ const ACT = {
     const j = await api("/checkin", { id: d.id, on: d.on === "1" });
     for (const L of [FD && FD.pubs, GD && GD.pubs]) if (L) for (const p of L) if (p.imHere && p.id !== d.id) { p.imHere = false; p.here = Math.max(0, p.here - 1); p.hereNicks = p.hereNicks.filter((n) => n !== ME.nick); }
     if (j.pub) swapPub(j.pub); else { const p = curPubs().find((x) => x.id === d.id); if (p) { p.imHere = false; p.here = Math.max(0, p.here - 1); p.hereNicks = p.hereNicks.filter((n) => n !== ME.nick); } reDraw(); }
-    toast(d.on === "1" ? "Checked in. Leeds fans can see you're here for the next 3 hours." : "Checked out.");
+    closeSheet(); toast(d.on === "1" ? "Checked in. Leeds fans can see you're here for the next 3 hours." : "Checked out.");
+    if (FD && (location.hash === "" || location.hash === "#/" || /\/hub$/.test(location.hash))) reload();
   },
   unattach() { ATTACH = null; const pv = $("#npPrev"); if (pv) pv.innerHTML = ""; },
   pubfocus(d) { closeSheet(); if (MAP) MAP.closePopup(); const el = document.getElementById("pub-" + d.id) || (() => { const m = $("#morePubs"); if (m) { m.hidden = false; const b = m.nextElementSibling; if (b) b.remove(); } return document.getElementById("pub-" + d.id); })(); if (el) { el.scrollIntoView({ behavior: "smooth", block: "center" }); el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash"); } },
@@ -982,13 +1136,14 @@ function swapPub(p) {
 function reDraw() {
   const [a, , c] = location.hash.replace(/^#\/?/, "").split("/");
   const y = window.scrollY;
-  if (a === "f" && FD) drawFixture(c || "info"); else if (a === "g" && GD) drawGround(); else if (a === "" || !a) pHome(); else route();
+  if (a === "f" && FD) drawFixture(c || "hub", false); else if (a === "g" && GD) drawGround(); else if ((a === "" || !a) && FD && HUBHOME) drawFixture("hub", true); else if (a === "feed") pHome(); else route();
   window.scrollTo(0, y);
 }
 function reload() {
   const [a, b, c] = location.hash.replace(/^#\/?/, "").split("/");
   const y = window.scrollY;
-  if (a === "f") pFixture(decodeURIComponent(b), c || "info").then(() => window.scrollTo(0, y));
+  if (a === "f") pFixture(decodeURIComponent(b), c || "hub").then(() => window.scrollTo(0, y));
+  else if ((a === "" || !a) && FD && HUBHOME) pFixture(FD.fixture.id, "hub", true).then(() => window.scrollTo(0, y));
   else if (a === "g") pGround(decodeURIComponent(b)).then(() => window.scrollTo(0, y));
   else route();
 }
@@ -998,6 +1153,9 @@ function getPos() {
   return new Promise((ok, no) => navigator.geolocation.getCurrentPosition((p) => ok({ lat: +p.coords.latitude.toFixed(5), lng: +p.coords.longitude.toFixed(5) }), (e) => no(new Error(e.code === 1 ? "Location is blocked. Allow it in your browser settings to drop a pin." : "Couldn't find your location. Try again outside.")), { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }));
 }
 const FORM = {
+  async quicklift(v) { await api("/lift", { ...v, share: !!v.share }); closeSheet(); toast(v.kind === "need" ? "Posted. Drivers can message you." : "Seats offered. Legend."); reload(); },
+  async quickticket(v) { await api("/ticket", { ...v, official: !!v.official }); closeSheet(); toast("Posted."); reload(); },
+  async predict(v) { const j = await api("/predict", { fid: v.fid, h: +v.h, a: +v.a }); closeSheet(); FD.preds = j.preds; toast("Locked in. Good luck!"); reload(); },
   async newpost(v, form) {
     if (needJoin()) return;
     const text = String(v.text || "").trim(); if (!text && !ATTACH) throw new Error("Write something or add a photo.");
@@ -1049,7 +1207,7 @@ const FORM = {
   async meet(v) {
     if (needJoin()) return;
     let loc = {}; if (v.useloc) { toast("Finding you…"); loc = await getPos(); }
-    await api("/meet", { ...v, ...loc, first: !!v.first }); toast(v.kind === "watch" ? "Added. See you there." : "Meet-up posted."); reload();
+    await api("/meet", { ...v, ...loc, first: !!v.first }); closeSheet(); toast(v.kind === "watch" ? "Added. See you there." : "Meet-up posted."); reload();
   },
   async lift(v) { if (needJoin()) return; await api("/lift", { ...v, share: !!v.share }); toast("Lift offered. Legend."); reload(); },
   async ticket(v) { if (needJoin()) return; await api("/ticket", { ...v, official: !!v.official }); toast("Posted."); reload(); },
