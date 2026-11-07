@@ -637,7 +637,8 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-store.init().then(() => {
+console.log(`[boot] ALAW ${VERSION} starting on Node ${process.version}`);
+Promise.race([store.init(), new Promise((r) => setTimeout(() => { console.warn("[boot] storage slow to answer, starting anyway"); r(); }, 25000))]).catch((e) => console.error("[boot] storage error:", e.message)).then(() => {
   FX.refresh(true);
   setInterval(() => FX.refresh(), 30 * 60e3).unref();
   const warm = async () => { for (const g of groundsList().filter((x) => x.next).slice(0, 8)) { if (!GEO.cached(g.key)) await GEO.nearby(g).catch(() => null); } };
