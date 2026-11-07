@@ -667,6 +667,14 @@ async function api(req, res, url) {
       const mm = String(body.coords || "").match(/(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/); if (!mm) return send(res, 400, { error: "Paste coordinates like 53.7778, -1.5721" });
       GEO.setGeo(g.key, +mm[1], +mm[2]); const n = await GEO.nearby(g, true); return send(res, 200, { ok: true, pubs: n ? n.pubs.length : 0, error: GEO.status().error });
     }
+    if (p === "/api/admin/wipe" && M === "POST") {
+      if (body.confirm !== "DELETE") return send(res, 400, { error: "Type DELETE to confirm." });
+      for (const x of store.all("posts")) if (x.img) store.delImg(x.img);
+      const keep = new Set(["meta"]); const done = [];
+      for (const c of store.COLLECTIONS) if (!keep.has(c)) { await store.wipe(c); done.push(c); }
+      console.log("[admin] wiped:", done.join(", "));
+      return send(res, 200, { ok: true, wiped: done });
+    }
     if (p === "/api/admin/pubsearch" && M === "POST") {
       const g = groundsList().find((x) => x.key === String(body.key || "")); if (!g) return send(res, 404, { error: "Ground not found." });
       const n = await GEO.nearby(g, true); return send(res, 200, { ok: true, pubs: n ? n.pubs.length : 0, error: GEO.status().error });

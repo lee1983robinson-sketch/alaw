@@ -95,7 +95,7 @@ const ic = (n, s = 20, extra = "") => `<svg aria-hidden="true" width="${s}" heig
 
 /* ---------- nav and shell ---------- */
 function nav(on) {
-  const L = [["", "home", "Matchday"], ["feed", "chat", "Feed"], ["games", "cal", "Games"], ["pubs", "pint", "Pubs"], ["me", "user", "Me"]];
+  const L = [["", "home", "Matchday"], ["feed", "chat", "Feed"], ["photos", "cam", "Photos"], ["games", "cal", "Games"], ["pubs", "pint", "Pubs"], ["me", "user", "Me"]];
   NAV.innerHTML = L.map(([r, i, t]) => `<a href="#/${r}" class="${on === r ? "on" : ""}" ${on === r ? 'aria-current="page"' : ""}>${ic(i, 22)}${t}${r === "me" && (UNREAD || NOTES) ? '<span class="dot" aria-label="New activity"></span>' : ""}</a>`).join("");
 }
 function topbar() {
@@ -151,7 +151,7 @@ function route() {
   clearInterval(TIMER); TIMER = null; clearInterval(LTIMER); LTIMER = null; closeSheet(); if (MAP) { try { MAP.remove(); } catch (e) {} MAP = null; }
   const parts = location.hash.replace(/^#\/?/, "").split("/").map(decodeURIComponent);
   const [a, b, c] = parts;
-  curNav = { "": "", games: "games", aways: "games", f: "games", clubs: "", lost: "", pubs: "pubs", g: "pubs", inbox: "inbox", dm: "inbox", me: "me", u: "", lounge: "", admin: "me", rules: "me", photos: "feed", notes: "", p: "feed", feed: "feed", league: "" }[a] ?? "";
+  curNav = { "": "", games: "games", aways: "games", f: "games", clubs: "", lost: "", pubs: "pubs", g: "pubs", inbox: "inbox", dm: "inbox", me: "me", u: "", lounge: "", admin: "me", rules: "me", photos: "photos", notes: "", p: "feed", feed: "feed", league: "" }[a] ?? "";
   nav(curNav);
   window.scrollTo(0, 0);
   const R = { "": pHub, feed: pHome, league: pLeague, games: pAways, aways: pAways, clubs: pClubs, lost: pLost, f: pFixture, pubs: pPubs, g: pGround, inbox: pInbox, dm: pDM, me: pMe, u: pUser, lounge: pLounge, rules: pRules, admin: pAdmin, photos: pGallery, notes: pNotes, p: pPost };
@@ -441,6 +441,14 @@ function predsHtml(D) {
     ${P.done && P.exact.length ? `<div class="tiny soft">Spot on: ${P.exact.map(esc).join(", ")}</div>` : ""}
   </section>`;
 }
+function photoStrip(D) {
+  const L = D.photos.filter((p) => !isBlocked(p.uid)).slice(0, 12);
+  return `<section class="card col" style="gap:10px">
+    <div class="row"><h2 class="h2 grow" style="font-size:22px">Photos${D.photos.length ? " · " + D.photos.length : ""}</h2><a href="#/photos" class="tiny">All Leeds photos</a></div>
+    ${L.length ? `<div class="strip">${L.map((p, i) => `<button class="ph" data-act="view" data-src="fd" data-i="${i}" aria-label="Photo by ${esc(p.nick)}"><img src="/img/${esc(p.img)}.jpg" alt="" loading="lazy"></button>`).join("")}</div>` : `<div class="tiny muted">No photos from this one yet. The ground, the pub, the train: get them up.</div>`}
+    <label class="btn y block" for="hubUp" style="cursor:pointer">${ic("cam", 18)}Add photos</label><input id="hubUp" type="file" accept="image/*" multiple class="sr" data-upload="${esc(D.fixture.id)}">
+  </section>`;
+}
 function whereHtml(D) {
   const hot = D.pubs.filter((p) => p.here).sort((a, b) => b.here - a.here).slice(0, 3);
   const M = D.map;
@@ -504,6 +512,7 @@ const TABV = {
     return `${tilesHtml(D)}
     ${predsHtml(D)}
     ${whereHtml(D)}
+    ${photoStrip(D)}
     <section class="col" style="gap:10px"><h2 class="h2">What's happening</h2>
       <div class="tabs" role="tablist" aria-label="Filter">${SF.map(([k, t]) => `<button role="tab" aria-selected="${SFILTER === k}" class="tab ${SFILTER === k ? "on" : ""}" data-act="sfilter" data-k="${k}">${t}</button>`).join("")}</div>
       <div id="stream" class="col" style="gap:10px">${streamHtml(D.stream, SFILTER)}</div>
@@ -998,6 +1007,10 @@ async function pAdmin() {
       <div><label class="l" for="po">Options (one per line, 2 to 6)</label><textarea class="f" id="po" name="options" required></textarea></div><button class="btn y">Start poll</button></form>
       ${(j.polls || []).map((pl) => `<div class="row small"><span class="grow">${esc(pl.q)} · ${pl.total} votes${pl.closed ? " · closed" : ""}</span>${pl.closed ? "" : `<button class="btn" data-act="admclosepoll" data-id="${esc(pl.id)}">Close</button>`}</div>`).join("")}
     </section>
+    <section class="card col" style="border-color:var(--bad)"><h2 class="h2" style="font-size:20px;color:var(--bad)">Start fresh</h2>
+      <p class="note">Deletes every account, post, photo, comment, lift, ticket, meet-up, check-in, prediction, rating, poll and message. Fixtures and pub lists stay. This can't be undone, and you'll need to join again yourself.</p>
+      <form data-form="admwipe" class="col"><label class="l" for="wipeC">Type DELETE to confirm</label><input class="f" id="wipeC" name="confirm" autocomplete="off" required><button class="btn" style="border-color:var(--bad);color:var(--bad)">Wipe everything and start fresh</button></form>
+    </section>
     <button class="btn" data-act="admlogout">Lock admin</button></div>`;
 }
 
@@ -1039,7 +1052,7 @@ async function upload(fid, files) {
     const cap = $("#cap").value; let ok = 0;
     for (const d of datas) { try { await api("/photo", { fid, caption: cap, data: d }); ok++; } catch (er) { toast(er.message); break; } }
     closeSheet(); if (ok) toast(`${ok} photo${ok === 1 ? "" : "s"} posted. MOT!`);
-    if (location.hash.startsWith("#/photos")) pGallery(GALFID); else pFixture(fid, "photos");
+    if (location.hash.startsWith("#/photos")) pGallery(GALFID); else reload();
   };
 }
 function viewer(i, src) {
@@ -1316,6 +1329,12 @@ const FORM = {
   },
   async club(v) { if (needJoin()) return; await api("/club", { ...v, coach: !!v.coach }); toast("Branch added. Cheers."); pClubs(); },
   async lost(v) { if (needJoin()) return; await api("/lost", v); toast("Posted. Fingers crossed."); pLost(); },
+  async admwipe(v) {
+    if (v.confirm !== "DELETE") throw new Error("Type DELETE in capitals to confirm.");
+    const j = await api("/admin/wipe", { confirm: "DELETE" });
+    AUTH = null; LS.set("alawAuth", null); LS.set("alawBoot", null); LS.set("alawHub", null); ME = null; FCACHE.clear(); PC.clear();
+    await refreshBoot(); toast(`Done. Wiped ${j.wiped.length} kinds of data. Join again to start.`); pAdmin();
+  },
   async admground(v) { const j = await api("/admin/ground", v); toast(`Saved. Found ${j.pubs} pubs.`); pAdmin(); },
   async admpoll(v) { await api("/admin/poll", { q: v.q, options: String(v.options || "").split("\n") }); toast("Poll live."); pAdmin(); },
   async join(v) {
