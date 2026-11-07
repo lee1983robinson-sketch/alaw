@@ -1,6 +1,6 @@
 {
   "name": "alaw",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "private": true,
   "description": "ALAW: the Leeds United away day hub. Fixtures, pubs near the ground, photos, banter, meet-ups, lifts and spare tickets.",
   "main": "server.js",
