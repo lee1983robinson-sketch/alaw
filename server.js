@@ -225,7 +225,9 @@ function predLeague(me) {
 
 /* ---------- the matchday stream: everything fans are doing for one game ---------- */
 function streamFor(f, me, D) {
-  const S = [];
+  const S = [], CI = commentIndex();
+  const rep = (x) => { const L = (CI[x.id] || []).filter((c) => !(me && (me.blocked || []).includes(c.uid))); x.comments = L.length; x.lastComments = L.slice(-3).map((c) => commentOut(c, me)); return x; };
+  D.lifts.forEach(rep); D.tickets.forEach(rep); D.meets.forEach(rep); D.watch.forEach(rep);
   for (const l of D.lifts) S.push({ type: l.kind === "need" ? "liftneed" : "lift", at: l.at, ...l });
   for (const t of D.tickets) S.push({ type: t.kind === "wanted" ? "ticketwant" : "ticket", at: t.at, ...t, tkind: t.kind });
   for (const m of D.meets) S.push({ type: m.pin ? "pin" : "meet", at: m.at, ...m });
@@ -334,7 +336,11 @@ async function api(req, res, url) {
   if ((m = p.match(/^\/api\/f\/([\w-]+)$/))) {
     const f = FX.byId(m[1]); if (!f) return send(res, 404, { error: "Fixture not found." });
     const gi = groundsList().find((g) => g.key === f.ground);
-    const [sq, inj, lv] = await Promise.all([FX.squad(f).catch(() => null), LIVE.injuries(f).catch(() => null), LIVE.live(f).catch(() => null), gi && !(GEO.cached(f.ground) && GEO.cached(f.ground).pubs.length) ? Promise.race([GEO.nearby(gi), new Promise((r) => setTimeout(r, 9000))]).catch(() => null) : null]);
+    // never keep fans waiting: use what we have, fetch the rest in the background
+    if (gi && !(GEO.cached(f.ground) && GEO.cached(f.ground).pubs.length)) GEO.nearby(gi).catch(() => null);
+    const quick = (pr, fb, ms = 1200) => Promise.race([pr.catch(() => fb), new Promise((r) => setTimeout(() => r(fb), ms))]);
+    const lu = store.get("meta", "lu:" + f.id), ij = store.get("meta", "inj:" + f.id);
+    const [sq, inj, lv] = await Promise.all([quick(FX.squad(f), lu || null), quick(LIVE.injuries(f), ij ? ij.list : null), quick(LIVE.live(f), null, 2500)]);
     const D = fixtureDetail(f, me); D.squad = sq; D.injuries = inj; D.live = lv; D.rate = rateSummary(f, sq, me);
     if (lv && lv.score) { D.fixture.score = lv.score; D.fixture.status = lv.status; }
     D.preds = predSummary(D.fixture, me); D.stream = streamFor(f, me, D);
@@ -417,11 +423,14 @@ async function api(req, res, url) {
   }
   if (p === "/api/comment" && M === "POST") {
     if (!need()) return; if (slow("comment", 15, 60e3)) return;
-    const x = store.get("posts", String(body.pid || "")); if (!vis(x)) return send(res, 404, { error: "That post's gone." });
+    const ptype = ["lift", "ticket", "meet"].includes(body.type) ? body.type : "post";
+    const x = store.get(COLL[ptype], String(body.pid || "")); if (!vis(x)) return send(res, 404, { error: "That post's gone." });
     const text = clean(body.text, 500); if (!text) return send(res, 400, { error: "Say something first." });
-    const id = rid(10); const c = store.put("comments", id, { id, pid: x.id, uid: me.id, text, at: now() });
-    notify(x.uid, { type: "comment", from: me.id, pid: x.id, text: text.slice(0, 80) });
-    for (const uid of new Set(store.all("comments").filter((y) => y.pid === x.id).map((y) => y.uid))) if (uid !== x.uid) notify(uid, { type: "reply", from: me.id, pid: x.id, text: text.slice(0, 80) });
+    const id = rid(10); const c = store.put("comments", id, { id, pid: x.id, ptype, uid: me.id, text, at: now() });
+    const link = ptype === "post" ? { pid: x.id } : { fid: x.fid, tab: ptype === "meet" ? "meet" : ptype + "s" };
+    const what = ptype === "lift" ? (x.kind === "need" ? "lift request" : "lift") : ptype === "ticket" ? (x.kind === "wanted" ? "ticket request" : "spare ticket") : ptype === "meet" ? "meet-up" : "post";
+    notify(x.uid, { type: "comment", from: me.id, ...link, what, text: text.slice(0, 80) });
+    for (const uid of new Set(store.all("comments").filter((y) => y.pid === x.id).map((y) => y.uid))) if (uid !== x.uid) notify(uid, { type: "reply", from: me.id, ...link, what, text: text.slice(0, 80) });
     return send(res, 200, { comment: commentOut(c, me) });
   }
   if (p === "/api/notes") {
@@ -435,7 +444,7 @@ async function api(req, res, url) {
   if (p === "/api/grounds") return send(res, 200, { grounds: groundsList() });
   if ((m = p.match(/^\/api\/g\/([\w-]+)$/))) {
     const g = groundsList().find((x) => x.key === m[1]); if (!g) return send(res, 404, { error: "Ground not found." });
-    if (!(GEO.cached(g.key) && GEO.cached(g.key).pubs.length)) await Promise.race([GEO.nearby(g), new Promise((r) => setTimeout(r, 9000))]).catch(() => null);
+    if (!(GEO.cached(g.key) && GEO.cached(g.key).pubs.length)) await Promise.race([GEO.nearby(g), new Promise((r) => setTimeout(r, 2500))]).catch(() => null);
     const meets = g.next ? store.all("meets").filter((x) => x.fid === g.next.id && vis(x) && meetLive(x) && x.lat != null).map((x) => meetOut(x, me)) : [];
     return send(res, 200, { ground: { ...g, center: (GEO.cached(g.key) || {}).center || null }, pubs: pubsFor(g.key, me), map: mapFor(g.key), meets, tagList: TAGS });
   }
@@ -460,6 +469,13 @@ async function api(req, res, url) {
     store.put("pubs", x.id, x); return send(res, 200, { pub: pubOut(x, me) });
   }
 
+  if (p === "/api/pubsearch") {
+    const q = clean(url.searchParams.get("q"), 40), g = groundsList().find((x) => x.key === url.searchParams.get("ground"));
+    if (!g || q.length < 2) return send(res, 400, { error: "Type at least 2 letters." });
+    if (slow("pubsearch", 30, 600e3)) return;
+    try { const L = await GEO.searchPubs(g, q); const ids = new Set(L.map((x) => x.id)); return send(res, 200, { pubs: pubsFor(g.key, me).filter((x) => ids.has(x.id)) }); }
+    catch (e) { return send(res, 502, { error: "Pub search isn't answering right now. Try again in a minute." }); }
+  }
   if (p === "/api/checkin" && M === "POST") {
     if (!need()) return; if (slow("checkin", 20, 3600e3)) return;
     for (const c of store.all("checkins")) if (c.uid === me.id) store.del("checkins", `${c.pid}:${me.id}`);

@@ -27,6 +27,22 @@ async function api(path, body) {
   return j;
 }
 
+/* ---------- instant pages: show what we have, refresh quietly ---------- */
+const PC = new Map(), FCACHE = new Map();
+const LSJ = { get: (k) => { try { return JSON.parse(LS.get(k) || "null"); } catch (e) { return null; } }, set: (k, v) => { try { LS.set(k, JSON.stringify(v)); } catch (e) {} } };
+const busy = () => !!($("#sheet") || $("#viewer") || (document.activeElement && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) && document.activeElement.id !== "pubq"));
+async function swr(path, draw, fallback) {
+  const tok = location.hash, c = PC.get(path);
+  if (c) draw(c); else APP.innerHTML = fallback || skeleton();
+  try {
+    const j = await api(path); const changed = !c || JSON.stringify(j) !== JSON.stringify(c); PC.set(path, j);
+    if (changed && location.hash === tok && !busy()) { const y = window.scrollY; draw(j); if (c) window.scrollTo(0, y); }
+  } catch (e) { if (!c && location.hash === tok) APP.innerHTML = `<div class="empty">${esc(e.message)}<br><br><button class="btn y" onclick="location.reload()">Try again</button></div>`; }
+}
+function skeleton(home) {
+  return `${home ? topbar() : ""}<div class="col" style="gap:16px" aria-busy="true" aria-label="Loading"><div class="sk" style="height:200px"></div><div class="tiles">${'<div class="sk" style="height:104px"></div>'.repeat(6)}</div><div class="sk" style="height:120px"></div><div class="sk" style="height:90px"></div></div>`;
+}
+
 /* ---------- small bits ---------- */
 function toast(t) { const d = document.createElement("div"); d.className = "toast"; d.setAttribute("role", "status"); d.textContent = t; document.body.appendChild(d); setTimeout(() => d.remove(), 2600); }
 const TZ = { timeZone: "Europe/London" };
@@ -114,8 +130,12 @@ function closeSheet() { const s = $("#sheet"); if (s) s.remove(); const v = $("#
 
 /* ---------- boot ---------- */
 async function boot() {
-  try { BOOT = await api("/boot"); ME = BOOT.me; }
-  catch (e) { APP.innerHTML = `<div class="empty">Couldn't load ALAW. ${esc(e.message)}<br><br><button class="btn y" onclick="location.reload()">Try again</button></div>`; return; }
+  const saved = LSJ.get("alawBoot");
+  if (saved && saved.fixtures) { BOOT = saved; ME = AUTH ? saved.me : null; route(); }
+  else APP.innerHTML = skeleton(true);
+  try { BOOT = await api("/boot"); ME = BOOT.me; LSJ.set("alawBoot", BOOT); }
+  catch (e) { if (!saved) APP.innerHTML = `<div class="empty">Couldn't reach ALAW. ${esc(e.message)}<br><br><button class="btn y" onclick="location.reload()">Try again</button></div>`; return; }
+  if (saved) { checkInbox(); setInterval(checkInbox, 60e3); nav(curNav); return; }
   if (AUTH && !ME) { /* key no longer valid */ }
   checkInbox(); setInterval(checkInbox, 60e3);
   route();
@@ -124,7 +144,7 @@ async function checkInbox() {
   if (!ME) return;
   try { const [a, b] = await Promise.all([api("/inbox"), api("/notes")]); const was = UNREAD + "|" + NOTES; UNREAD = a.unread; NOTES = location.hash.startsWith("#/notes") ? 0 : b.unread; if (was !== UNREAD + "|" + NOTES) { nav(curNav); const tb = document.querySelector("header .row"); if (tb && document.querySelector("header .mark")) tb.outerHTML = topbar().match(/<div class="row" style="gap:8px">[\s\S]*?<\/div>/)[0]; } } catch (e) {}
 }
-async function refreshBoot() { try { BOOT = await api("/boot"); ME = BOOT.me; } catch (e) {} }
+async function refreshBoot() { try { BOOT = await api("/boot"); ME = BOOT.me; LSJ.set("alawBoot", BOOT); } catch (e) {} }
 
 let curNav = "";
 function route() {
@@ -284,9 +304,9 @@ async function pNotes() {
   APP.innerHTML = `<div class="spin">Loading…</div>`;
   let j; try { j = await api("/notes", {}); } catch (e) { APP.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
   NOTES = 0; nav(curNav);
-  const say = (n) => n.type === "cheer" ? `gave your post a MOT: “${esc(n.text)}”` : n.type === "comment" ? `commented: “${esc(n.text)}”` : n.type === "reply" ? `also commented: “${esc(n.text)}”` : n.type === "join" ? `is coming to your meet-up: ${esc(n.text)}` : esc(n.text || "");
+  const say = (n) => n.type === "cheer" ? `gave your post a MOT: “${esc(n.text)}”` : n.type === "comment" ? `replied to your ${esc(n.what || "post")}: “${esc(n.text)}”` : n.type === "reply" ? `also replied${n.what ? " on a " + esc(n.what) : ""}: “${esc(n.text)}”` : n.type === "join" ? `is coming to your meet-up: ${esc(n.text)}` : esc(n.text || "");
   APP.innerHTML = `<div class="col" style="gap:14px">${backBtn("#/")}<h1 class="h1">Notifications</h1>
-    ${j.notes.map((n) => `<a href="${n.pid ? "#/p/" + esc(n.pid) : n.fid ? "#/f/" + esc(n.fid) + "/meet" : "#/"}" class="card row" style="color:var(--text);${n.unread ? "border-color:var(--yellow)" : ""}">${av(n.nick)}<div class="grow small" style="line-height:1.4"><b>${esc(n.nick)}</b> ${say(n)}<div class="tiny muted">${ago(n.at)}</div></div></a>`).join("") || `<div class="empty">Nothing yet. Post something and the MOTs will roll in.</div>`}</div>`;
+    ${j.notes.map((n) => `<a href="${n.pid ? "#/p/" + esc(n.pid) : n.fid ? "#/f/" + esc(n.fid) + "/" + esc(n.tab || "meet") : "#/"}" class="card row" style="color:var(--text);${n.unread ? "border-color:var(--yellow)" : ""}">${av(n.nick)}<div class="grow small" style="line-height:1.4"><b>${esc(n.nick)}</b> ${say(n)}<div class="tiny muted">${ago(n.at)}</div></div></a>`).join("") || `<div class="empty">Nothing yet. Post something and the MOTs will roll in.</div>`}</div>`;
 }
 
 /* ---------- gallery ---------- */
@@ -333,16 +353,30 @@ function pHub() {
   if (!nx) return pHome();
   return pFixture(nx.id, "hub", true);
 }
-async function pFixture(id, tab = "hub", home = false) {
-  HUBHOME = !!home;
-  if (!FD || FD.fixture.id !== id) { APP.innerHTML = `${home ? topbar() : ""}<div class="spin">Loading the matchday…</div>`; }
-  try { FD = await api("/f/" + enc(id)); } catch (e) { APP.innerHTML = `<div class="col">${backBtn("#/games")}<div class="empty">${esc(e.message)}</div></div>`; return; }
-  if (tab === "pubs") tab = "map";
-  drawFixture(tab, home);
-  if (tab === "chat") startChat(id);
+async function pFixture(id, tab = "hub", home = false, fresh = false) {
+  HUBHOME = !!home; if (tab === "pubs") tab = "map";
+  const tok = location.hash;
+  const c = FCACHE.get(id) || (home ? LSJ.get("alawHub") : null);
+  const usable = c && c.fixture && c.fixture.id === id;
+  if (usable) { FD = c; drawFixture(tab, home); if (tab === "chat") startChat(id); }
+  else APP.innerHTML = skeleton(home);
+  if (usable && !fresh && NOW() - (c._at || 0) < 8000) return liveTimer();
+  try {
+    const D = await api("/f/" + enc(id)); D._at = NOW(); FCACHE.set(id, D); if (home) LSJ.set("alawHub", D);
+    if (location.hash !== tok) return;
+    const same = usable && JSON.stringify({ ...D, _at: 0, live: 0 }) === JSON.stringify({ ...c, _at: 0, live: 0 });
+    FD = D;
+    if (!same && !busy()) { const y = window.scrollY; drawFixture(tab, home); if (usable) window.scrollTo(0, y); if (tab === "chat" && !usable) startChat(id); }
+    else if (D.live) { const b = $("#livebox"); if (b) b.innerHTML = liveHtml(D.fixture, D.live, false); }
+    if (!D.map || !D.pubs.length) setTimeout(() => { if (location.hash === tok && !busy()) pFixture(id, tab, home, true); }, 7000);
+  } catch (e) { if (!usable && location.hash === tok) APP.innerHTML = `<div class="col">${backBtn("#/games")}<div class="empty">${esc(e.message)}<br><br><button class="btn y" onclick="location.reload()">Try again</button></div></div>`; return; }
+  liveTimer();
+}
+function liveTimer() {
+  if (!FD) return; const id = FD.fixture.id;
   const f = FD.fixture;
   if (FD.live || (f.ts - NOW() < 15 * 60e3 && NOW() - f.ts < 165 * 60e3)) {
-    clearInterval(LTIMER);
+    clearInterval(LTIMER); void id;
     LTIMER = setInterval(async () => { try { const r = await api("/live/" + enc(f.id)); FD.live = r.live; const b = $("#livebox"); if (b) b.innerHTML = liveHtml(f, r.live, false); } catch (e) {} }, 60e3);
   }
 }
@@ -428,7 +462,9 @@ function streamItem(x) {
   const f = FD.fixture, mine = ME && x.uid === ME.id;
   const who = `<a href="#/u/${esc(x.uid)}" style="color:var(--text);font-weight:700">${mine ? "You" : esc(x.nick)}</a>`;
   const V = (they, you) => (mine ? you : they);
-  const msg = (label) => (mine ? "" : `<a class="btn y" href="#/dm/${esc(x.uid)}">${label}</a>`);
+  const game = f.isAway ? short(f.home.name) + " away" : "Leeds v " + short(f.away.name);
+  const pre = { liftneed: `Hi ${x.nick}, I can give you a lift from ${x.from} for ${game}.`, lift: `Hi ${x.nick}, any room for me from ${x.from} for ${game}?`, ticket: `Hi ${x.nick}, saw you've got a spare for ${game}. Is it still going? Happy to do it through the club's ticket transfer.`, ticketwant: `Hi ${x.nick}, I've got a spare for ${game}. We can do it through the club's ticket transfer.` }[x.type] || "";
+  const msg = (label) => (mine ? "" : `<a class="btn y" href="#/dm/${esc(x.uid)}${pre ? "/" + enc(pre) : ""}">${label}</a>`);
   const sorted = (type) => (mine ? `<button class="btn" data-act="close" data-type="${type}" data-id="${esc(x.id)}" data-on="${x.closed ? 0 : 1}">${x.closed ? "Reopen" : "Mark sorted"}</button>` : "");
   const walk = x.lat != null ? `<a class="btn" href="${dirUrl(x.lat, x.lng)}" target="_blank" rel="noopener">${ic("pin", 16)}Walk there</a>` : "";
   const join = (lbl) => `<button class="btn ${x.joined ? "on" : "y"}" data-act="meetjoin" data-id="${esc(x.id)}" data-on="${x.joined ? 0 : 1}" aria-pressed="${!!x.joined}">${x.joined ? ic("check", 16) + "In · " + x.count : lbl + (x.count ? " · " + x.count : "")}</button>`;
@@ -446,7 +482,17 @@ function streamItem(x) {
     case "photo": line = `${who} posted a photo`; extra = x.text; return `<article class="sitem card col" style="gap:8px">${sHead(x, line)}${x.img ? `<a class="pimg" href="#/p/${esc(x.id)}"><img src="/img/${esc(x.img)}.jpg" alt="${esc(x.text || "Photo")}" loading="lazy" style="width:100%;max-height:360px;object-fit:cover;border-radius:12px"></a>` : ""}${extra ? `<div class="small soft">${esc(extra)}</div>` : ""}<div class="row" style="gap:8px">${cheerBtn(x)}<a class="chip" style="min-height:32px" href="#/p/${esc(x.id)}">Comment${x.comments ? " · " + x.comments : ""}</a></div></article>`;
     case "post": case "tip": line = `${who} ${x.type === "tip" ? "shared a tip" + (x.tag ? ": " + esc(x.tag) : "") : "posted"}`; extra = x.text; acts = cheerBtn(x) + (x.type === "post" ? `<a class="chip" style="min-height:32px" href="#/p/${esc(x.id)}">Comment${x.comments ? " · " + x.comments : ""}</a>` : ""); break;
   }
-  return `<article class="sitem card col" style="gap:8px;${x.closed ? "opacity:.6" : ""}">${sHead(x, line)}${extra ? `<div class="small soft" style="white-space:pre-wrap;line-height:1.45">${esc(extra)}</div>` : ""}${acts ? `<div class="row" style="gap:8px;flex-wrap:wrap">${acts}</div>` : ""}</article>`;
+  const rtype = { lift: "lift", liftneed: "lift", ticket: "ticket", ticketwant: "ticket", meet: "meet", pin: "meet", watch: "meet" }[x.type];
+  return `<article class="sitem card col" style="gap:8px;${x.closed ? "opacity:.6" : ""}" id="s-${esc(x.id)}">${sHead(x, line)}${extra ? `<div class="small soft" style="white-space:pre-wrap;line-height:1.45">${esc(extra)}</div>` : ""}${acts ? `<div class="row" style="gap:8px;flex-wrap:wrap">${acts}</div>` : ""}${rtype ? repliesHtml(x, rtype) : ""}</article>`;
+}
+function repliesHtml(x, type) {
+  const L = (x.lastComments || []).filter((c) => !isBlocked(c.uid));
+  const ph = { lift: x.type === "liftneed" ? "Reply: I'm going that way…" : "Reply: any room for me?", ticket: x.type === "ticketwant" ? "Reply: I've got one…" : "Reply: I'll take it…", meet: "Reply: see you there…" }[type];
+  return `<div class="col replies" style="gap:6px;border-top:1px solid var(--line);padding-top:8px">
+    ${x.comments > L.length ? `<div class="tiny muted">${x.comments - L.length} earlier repl${x.comments - L.length === 1 ? "y" : "ies"}</div>` : ""}
+    <div class="col rlist" style="gap:4px">${L.map((c) => `<div class="small" style="line-height:1.4"><a href="#/u/${esc(c.uid)}" style="color:var(--text);font-weight:700">${esc(c.nick)}</a> <span class="soft">${esc(c.text)}</span></div>`).join("")}</div>
+    ${x.closed ? "" : `<form data-form="reply" class="row" style="gap:6px"><input type="hidden" name="pid" value="${esc(x.id)}"><input type="hidden" name="type" value="${type}"><label class="sr" for="r-${esc(x.id)}">Reply publicly</label><input class="f grow" id="r-${esc(x.id)}" name="text" maxlength="500" placeholder="${esc(ph)}" style="min-height:40px;padding:8px 12px"><button class="ibtn" style="width:40px;height:40px" aria-label="Send reply">${ic("send", 16)}</button></form>`}
+  </div>`;
 }
 function sHead(x, line) {
   const [i, c, bg] = SIC[x.type] || SIC.post;
@@ -664,22 +710,22 @@ async function drawMap(elId, M, pubs, meets) {
   if (MAP) { try { MAP.remove(); } catch (e) {} }
   el.innerHTML = "";
   const L = window.L;
-  MAP = L.map(el, { zoomControl: true, scrollWheelZoom: false, tap: true }).setView([M.center.lat, M.center.lng], 15);
+  MAP = L.map(el, { zoomControl: true, scrollWheelZoom: false, tap: true, zoomAnimation: false, fadeAnimation: false, markerZoomAnimation: false }).setView([M.center.lat, M.center.lng], 15);
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors' }).addTo(MAP);
   const icon = (cls, html, size = 30) => L.divIcon({ className: "", html: `<div class="mk ${cls}">${html}</div>`, iconSize: [size, size], iconAnchor: [size / 2, size / 2], popupAnchor: [0, -size / 2] });
   const pts = [[M.center.lat, M.center.lng]];
   L.marker([M.center.lat, M.center.lng], { icon: icon("ground", ic("shield", 18), 38), zIndexOffset: 500, title: "The ground" }).addTo(MAP).bindPopup("<b>The ground</b>");
   (pubs || []).filter((p) => p.lat != null).forEach((p, i) => {
-    const hot = p.here > 0;
-    L.marker([p.lat, p.lng], { icon: icon(hot ? "hot" : "pub", hot ? String(p.here) : String(i + 1)), zIndexOffset: hot ? 400 : 0, title: p.name }).addTo(MAP)
+    const hot = p.here > 0, big = hot || i < 30;
+    L.marker([p.lat, p.lng], { icon: big ? icon(hot ? "hot" : "pub", hot ? String(p.here) : String(i + 1)) : icon("pub sm", "", 14), zIndexOffset: hot ? 400 : big ? 100 : 0, title: p.name }).addTo(MAP)
       .bindPopup(`<b>${esc(p.name)}</b><br>${p.walk != null ? p.walk + " min walk" : ""}${hot ? ` · <b style="color:#FFCD00">${p.here} Leeds here</b>` : ""}${p.score != null ? ` · ${p.score}% would go back` : ""}<br><a href="#pub-${esc(p.id)}" data-act="pubfocus" data-id="${esc(p.id)}">Details</a> · <a href="${dirUrl(p.lat, p.lng)}" target="_blank" rel="noopener">Walk there</a>`);
     if (p.d != null && p.d < 900) pts.push([p.lat, p.lng]);
   });
   (M.stations || []).forEach((x) => L.marker([x.lat, x.lng], { icon: icon("station", ic("train", 16)), title: x.name }).addTo(MAP).bindPopup(`<b>${esc(x.name)}</b><br>${km(x.d)} from the ground<br><a href="${dirUrl(x.lat, x.lng)}" target="_blank" rel="noopener">Directions</a>`));
   (M.parking || []).forEach((x) => L.marker([x.lat, x.lng], { icon: icon("park", "P", 26), title: x.name }).addTo(MAP).bindPopup(`<b>${esc(x.name)}</b><br>${km(x.d)} from the ground`));
   (meets || []).filter((m) => m.lat != null).forEach((m) => { L.marker([m.lat, m.lng], { icon: icon("meet", ic("pin", 16), 34), zIndexOffset: 600, title: m.title }).addTo(MAP).bindPopup(`<b>${esc(m.title)}</b><br>${esc(m.nick)} · ${m.count} going${m.time ? " · " + esc(m.time) : ""}<br><a href="${dirUrl(m.lat, m.lng)}" target="_blank" rel="noopener">Walk there</a>`); pts.push([m.lat, m.lng]); });
-  if (pts.length > 1) MAP.fitBounds(pts, { padding: [28, 28], maxZoom: 16 });
-  setTimeout(() => MAP && MAP.invalidateSize(), 150);
+  if (pts.length > 1) MAP.fitBounds(pts, { padding: [28, 28], maxZoom: 16, animate: false });
+  const m = MAP; setTimeout(() => { if (MAP === m && document.body.contains(el)) { try { m.invalidateSize(false); } catch (e) {} } }, 150);
 }
 function pubCard(p, i) {
   const homeOnly = p.tags.some((t) => t.t === "Home fans only") && !p.tags.some((t) => t.t === "Away-friendly");
@@ -694,20 +740,41 @@ function pubCard(p, i) {
     <div class="chips">${p.tags.map((t) => `<button class="chip ${t.t === "Away-friendly" ? "good" : t.t === "Home fans only" ? "bad" : t.t === "Gets rammed" ? "warn" : ""} ${t.mine ? "mine" : ""}" data-act="pubtag" data-id="${esc(p.id)}" data-tag="${esc(t.t)}" data-on="${t.mine ? 0 : 1}" aria-pressed="${t.mine}">${esc(t.t)} · ${t.n}</button>`).join("")}<button class="chip" data-act="tagsheet" data-id="${esc(p.id)}">+ Tag</button></div>
     ${p.note ? `<p class="soft small" style="margin:0;line-height:1.45">“${esc(p.note)}” — <a href="#/u/${esc(p.uid)}">${esc(p.nick)}</a></p>` : ""}
     ${p.votes ? `<div class="tiny muted">${p.score}% of ${p.votes} fan${p.votes === 1 ? "" : "s"} would go back</div>` : ""}
-    <div class="row" style="flex-wrap:wrap;gap:8px">
-      <button class="btn ${p.imHere ? "on" : "y"}" data-act="checkin" data-id="${esc(p.id)}" data-on="${p.imHere ? 0 : 1}" aria-pressed="${p.imHere}">${p.imHere ? ic("check", 16) + "You're here" : "I'm here"}</button>
-      <button class="btn ${p.myVote === 1 ? "on" : ""}" data-act="pubvote" data-id="${esc(p.id)}" data-v="${p.myVote === 1 ? 0 : 1}" aria-pressed="${p.myVote === 1}">Would go back</button>
-      <button class="btn ${p.myVote === -1 ? "on" : ""}" data-act="pubvote" data-id="${esc(p.id)}" data-v="${p.myVote === -1 ? 0 : -1}" aria-pressed="${p.myVote === -1}">Wouldn't</button>
-      <a class="btn" href="${p.lat != null ? dirUrl(p.lat, p.lng) : `https://www.google.com/maps/search/?api=1&query=${enc(p.name + " " + (p.address || ""))}`}" target="_blank" rel="noopener">${ic("pin", 16)}Walk there</a>
+    <div class="row" style="gap:8px">
+      <button class="btn ${p.imHere ? "on" : "y"} grow" data-act="checkin" data-id="${esc(p.id)}" data-on="${p.imHere ? 0 : 1}" aria-pressed="${p.imHere}">${p.imHere ? ic("check", 16) + "You're here" : "I'm here"}</button>
+      <a class="btn grow" href="${p.lat != null ? dirUrl(p.lat, p.lng) : `https://www.google.com/maps/search/?api=1&query=${enc(p.name + " " + (p.address || ""))}`}" target="_blank" rel="noopener">${ic("pin", 16)}Walk there</a>
+    </div>
+    <div class="row" style="gap:6px;flex-wrap:wrap"><span class="tiny muted">Rate it:</span>
+      <button class="chip ${p.myVote === 1 ? "mine good" : ""}" style="min-height:36px" data-act="pubvote" data-id="${esc(p.id)}" data-v="${p.myVote === 1 ? 0 : 1}" aria-pressed="${p.myVote === 1}">Would go back${p.up ? " · " + p.up : ""}</button>
+      <button class="chip ${p.myVote === -1 ? "mine bad" : ""}" style="min-height:36px" data-act="pubvote" data-id="${esc(p.id)}" data-v="${p.myVote === -1 ? 0 : -1}" aria-pressed="${p.myVote === -1}">Wouldn't${p.votes - p.up ? " · " + (p.votes - p.up) : ""}</button>
     </div>
   </article>`;
 }
+let PUBQ = "", PUBSORT = "busy", PUBN = 20, PUBS = [], PUBGROUND = "";
+function sortedPubs() {
+  const q = PUBQ.trim().toLowerCase();
+  let L = PUBS.filter((p) => (!p.uid || !isBlocked(p.uid)) && (!q || (p.name + " " + (p.address || "")).toLowerCase().includes(q)));
+  if (PUBSORT === "near") L = L.slice().sort((a, b) => (a.d ?? 9e9) - (b.d ?? 9e9));
+  else if (PUBSORT === "top") L = L.slice().sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || b.votes - a.votes || (a.d ?? 9e9) - (b.d ?? 9e9));
+  return L;
+}
+function pubListHtml() {
+  const L = sortedPubs(), q = PUBQ.trim();
+  const shown = L.slice(0, PUBN);
+  return `${shown.map(pubCard).join("") || `<div class="empty">${q ? `No pubs near here called “${esc(q)}”.` : "No pubs found here yet."}</div>`}
+    ${L.length > PUBN ? `<button class="btn block" data-act="pubmore">Show more · ${L.length - PUBN} left</button>` : ""}
+    ${q.length >= 2 ? `<button class="btn y block" data-act="pubremote">${ic("pint", 18)}Search all pubs for “${esc(q)}”</button>` : ""}`;
+}
 function pubsHtml(pubs, ground, gname) {
   const tags = BOOT.tags || [];
-  const L = pubs.filter((p) => !p.uid || !isBlocked(p.uid));
-  const first = L.slice(0, 10), rest = L.slice(10);
-  return `${first.map(pubCard).join("") || `<div class="empty">No pubs found for ${esc(gname || "this ground")} yet. Know a good one, or one to avoid? Add it.</div>`}
-  ${rest.length ? `<div id="morePubs" class="col" hidden>${rest.map((p, i) => pubCard(p, i + 10)).join("")}</div><button class="btn block" data-act="morepubs">Show ${rest.length} more pubs</button>` : ""}
+  if (PUBGROUND !== ground) { PUBQ = ""; PUBN = 20; PUBSORT = "busy"; }
+  PUBS = pubs; PUBGROUND = ground;
+  const inNow = pubs.reduce((a, p) => a + (p.here || 0), 0);
+  return `<div class="col" style="gap:10px">
+    <div class="row" style="gap:8px"><label class="sr" for="pubq">Search pubs</label><input class="f grow" id="pubq" type="search" enterkeyhint="search" autocomplete="off" placeholder="Search ${pubs.length} pubs by name or street" value="${esc(PUBQ)}"></div>
+    <div class="row" style="gap:8px;flex-wrap:wrap"><div class="tabs" style="margin:0;padding:0;flex:1">${[["busy", "Busiest"], ["near", "Nearest"], ["top", "Top rated"]].map(([k, t]) => `<button class="tab ${PUBSORT === k ? "on" : ""}" data-act="pubsort" data-k="${k}" aria-pressed="${PUBSORT === k}">${t}</button>`).join("")}</div>${inNow ? `<span class="chip warn"><span class="pulse" aria-hidden="true"></span> ${inNow} Leeds in pubs now</span>` : ""}</div>
+    <div id="publist" class="col">${pubListHtml()}</div>
+  </div>
   <button class="btn dash big block" data-act="show" data-target="pubForm">Pub missing? Add it</button>
   <form id="pubForm" data-form="pub" class="card col" hidden><input type="hidden" name="ground" value="${esc(ground)}">
     <div><label class="l" for="pn">Pub name</label><input class="f" id="pn" name="name" maxlength="60" required></div>
@@ -717,10 +784,9 @@ function pubsHtml(pubs, ground, gname) {
     <div><label class="l" for="pnote">Your verdict</label><textarea class="f" id="pnote" name="note" maxlength="240" placeholder="Bouncers sound, cheap pints, sing your heart out"></textarea></div>
     <button class="btn y">Add pub</button></form>`;
 }
-async function pPubs() {
-  APP.innerHTML = `<div class="spin">Loading grounds…</div>`;
-  let j; try { j = await api("/grounds"); } catch (e) { APP.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
-  const G = j.grounds.filter((g) => g.key !== "elland-road" || true);
+async function pPubs() { return swr("/grounds", drawPubs, `${topbar()}<div class="col" style="gap:12px">${'<div class="sk" style="height:72px"></div>'.repeat(6)}</div>`); }
+function drawPubs(j) {
+  const G = j.grounds;
   APP.innerHTML = `${topbar()}<div class="col" style="gap:16px"><div><div class="kicker">Every ground Leeds play at this season</div><h1 class="h1">Pubs near the ground</h1></div>
     ${G.map((g) => `<a href="#/g/${esc(g.key)}" class="card row" style="color:var(--text)">
       <span class="ibtn" style="background:var(--card2)">${ic("pint")}</span>
@@ -729,11 +795,7 @@ async function pPubs() {
   </div>`;
 }
 let GD = null;
-async function pGround(key) {
-  APP.innerHTML = `<div class="spin">Loading pubs…</div>`;
-  try { GD = await api("/g/" + enc(key)); } catch (e) { APP.innerHTML = `<div class="col">${backBtn("#/pubs")}<div class="empty">${esc(e.message)}</div></div>`; return; }
-  drawGround();
-}
+async function pGround(key) { PUBQ = ""; PUBN = 20; return swr("/g/" + enc(key), (j) => { GD = j; drawGround(); }); }
 function drawGround() {
   const g = GD.ground;
   APP.innerHTML = `<div class="col" style="gap:16px">${backBtn("#/pubs", "Back to grounds")}
@@ -816,8 +878,8 @@ async function pInbox() {
     ${j.inbox.map((c) => `<a href="#/dm/${esc(c.uid)}" class="card row" style="color:var(--text)">${av(c.nick)}<div class="grow"><div style="font-weight:${c.unread ? 800 : 600}">${esc(c.nick)}</div><div class="tiny ${c.unread ? "soft" : "muted"}" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.last)}</div></div><span class="tiny muted">${ago(c.at)}</span>${c.unread ? '<span class="dot" style="position:static" aria-label="Unread"></span>' : ""}</a>`).join("") || `<div class="empty">No messages yet. Message a driver for a lift, or a fan with a spare ticket.</div>`}
     <p class="note">Keep chats about lifts and tickets on here until you're happy. Never send money for tickets, and meet in public.</p></div>`;
 }
-async function pDM(uid) {
-  if (!ME) { location.hash = "#/me"; return; }
+async function pDM(uid, pre) {
+  if (!ME) { needJoin(); return; }
   APP.innerHTML = `<div class="spin">Loading…</div>`;
   let j; try { j = await api("/dm/" + enc(uid)); } catch (e) { APP.innerHTML = `<div class="col">${backBtn("#/inbox")}<div class="empty">${esc(e.message)}</div></div>`; return; }
   const draw = (J) => J.msgs.map((m) => `<div class="msg ${m.mine ? "me" : ""}" data-at="${m.at}">${m.mine ? "" : av(J.with.nick)}<div class="bub">${esc(m.t)}<div class="tiny muted" style="margin-top:3px">${ago(m.at)}</div></div></div>`).join("");
@@ -827,6 +889,7 @@ async function pDM(uid) {
     ${j.blocked ? `<div class="empty">You can't message each other.</div>` : `<form data-form="dm" class="compose"><input type="hidden" name="to" value="${esc(uid)}"><label class="sr" for="dmText">Message</label><textarea class="f grow" id="dmText" name="text" maxlength="500" rows="1" placeholder="Message…" required></textarea><button class="ibtn" style="background:var(--yellow);border-color:var(--yellow);color:#0B1426" aria-label="Send">${ic("send", 18)}</button></form>`}
   </div>`;
   window.scrollTo(0, document.body.scrollHeight);
+  if (pre) { const t = $("#dmText"); if (t) { t.value = pre; t.style.height = "auto"; t.style.height = Math.min(160, t.scrollHeight + 4) + "px"; t.focus(); } }
   TIMER = setInterval(async () => {
     const box = $("#dmlist"); if (!box) return clearInterval(TIMER);
     try { const J = await api("/dm/" + enc(uid)); if (J.msgs.length !== box.querySelectorAll(".msg").length) { box.innerHTML = draw(J); window.scrollTo(0, document.body.scrollHeight); } } catch (e) {}
@@ -997,6 +1060,21 @@ function viewer(i, src) {
 const ACT = {
   sfilter(d) { SFILTER = d.k; const el = $("#stream"); if (el && FD) el.innerHTML = streamHtml(FD.stream, SFILTER); document.querySelectorAll('[data-act="sfilter"]').forEach((b) => { const on = b.dataset.k === SFILTER; b.classList.toggle("on", on); b.setAttribute("aria-selected", on); }); },
   quick(d) {
+    if (!FD) return;
+    const K = d.k;
+    if (K === "predict") return ACT.quickform(d);
+    const map = { liftneed: ["lift", "Seats on offer", "Fans with room in the car. Ask for a seat, or post that you need one.", "Post that I need a lift"],
+      liftoffer: ["liftneed", "Fans who need a lift", "Got room? Offer them a seat, or post your spare seats.", "Offer my spare seats"],
+      ticketspare: ["ticketwant", "Fans who need a ticket", "Message them, or post your spare so anyone can ask for it.", "Post my spare ticket"],
+      ticketwant: ["ticket", "Spare tickets", "Ask for one, or post that you need one so fans with a spare can find you.", "Post that I need a ticket"],
+      meet: ["meet", "Where Leeds are meeting", "Join one, or set up your own.", "Set up a meet-up"] }[K];
+    const want = map[0], S = FD.stream.filter((x) => (x.type === want || (want === "meet" && x.type === "pin")) && !x.closed);
+    const others = S.filter((x) => !(ME && x.uid === ME.id));
+    sheet(`<h2 class="h2" style="font-size:24px">${map[1]}${others.length ? ` · ${others.length}` : ""}</h2><p class="note">${map[2]}</p>
+      <div class="col" style="gap:10px">${others.map(streamItem).join("") || `<div class="empty" style="padding:14px">Nobody yet. Post yours and fans can message you or reply.</div>`}</div>
+      <button class="btn y big" data-act="quickform" data-k="${K}">${map[3]}</button><button class="btn" data-act="close-sheet">Close</button>`);
+  },
+  quickform(d) {
     if (needJoin()) return; if (!FD) return;
     const f = FD.fixture, fid = esc(f.id), K = d.k;
     const close = `<button type="button" class="btn" data-act="close-sheet">Cancel</button>`;
@@ -1009,15 +1087,15 @@ const ACT = {
       liftoffer: `<h2 class="h2" style="font-size:22px">Got a spare seat</h2><form data-form="quicklift" class="col"><input type="hidden" name="fid" value="${fid}"><input type="hidden" name="kind" value="offer">
         <div><label class="l" for="qf">Setting off from (town or area)</label><input class="f" id="qf" name="from" maxlength="40" placeholder="Wakefield" required></div>
         <div class="row"><div class="grow"><label class="l" for="qd">Leaving</label><input class="f" id="qd" name="depart" type="time"></div><div class="grow"><label class="l" for="qs">Seats</label><select class="f" id="qs" name="seats">${[1, 2, 3, 4, 5, 6].map((n) => `<option>${n}</option>`).join("")}</select></div><div class="grow"><label class="l" for="qc">£ petrol</label><input class="f" id="qc" name="cost" type="number" min="0" max="60" inputmode="numeric" placeholder="0"></div></div>
-        <label class="check"><input type="checkbox" name="share" required> Petrol money only, no profit, and I'm insured.</label>
+        <label class="check"><input type="checkbox" name="share"> Petrol money only, no profit, and I'm insured.</label>
         <button class="btn y big">Offer seats</button>${close}</form>`,
       ticketspare: `<h2 class="h2" style="font-size:22px">Spare ticket</h2><form data-form="quickticket" class="col"><input type="hidden" name="fid" value="${fid}"><input type="hidden" name="kind" value="spare">
         <div class="row"><div class="grow"><label class="l" for="qq">How many</label><select class="f" id="qq" name="qty">${[1, 2, 3, 4].map((n) => `<option>${n}</option>`).join("")}</select></div><div class="grow" style="flex:2"><label class="l" for="qa">Area or type</label><input class="f" id="qa" name="area" maxlength="60" placeholder="Away end, adult"></div></div>
-        <label class="check"><input type="checkbox" name="official" required> It'll go through the club's official ticket transfer or exchange, not sold privately.</label>
+        <label class="check"><input type="checkbox" name="official"> It'll go through the club's official ticket transfer or exchange, not sold privately.</label>
         <button class="btn y big">Post spare</button>${close}</form>`,
       ticketwant: `<h2 class="h2" style="font-size:22px">Need a ticket</h2><form data-form="quickticket" class="col"><input type="hidden" name="fid" value="${fid}"><input type="hidden" name="kind" value="wanted">
         <div class="row"><div class="grow"><label class="l" for="qq">How many</label><select class="f" id="qq" name="qty">${[1, 2, 3, 4].map((n) => `<option>${n}</option>`).join("")}</select></div><div class="grow" style="flex:2"><label class="l" for="qa">Notes</label><input class="f" id="qa" name="notes" maxlength="200" placeholder="Member with away points"></div></div>
-        <label class="check"><input type="checkbox" name="official" required> I'll only take one through the club's official transfer or exchange.</label>
+        <label class="check"><input type="checkbox" name="official"> I'll only take one through the club's official transfer or exchange.</label>
         <button class="btn y big">Post</button>${close}</form>`,
       meet: `<h2 class="h2" style="font-size:22px">Where we meeting?</h2><form data-form="meet" class="col"><input type="hidden" name="fid" value="${fid}">
         <div><label class="l" for="qw">Where?</label><input class="f" id="qw" name="where" maxlength="80" placeholder="The Old Peacock, beer garden" required></div>
@@ -1120,7 +1198,21 @@ const ACT = {
     if (FD && (location.hash === "" || location.hash === "#/" || /\/hub$/.test(location.hash))) reload();
   },
   unattach() { ATTACH = null; const pv = $("#npPrev"); if (pv) pv.innerHTML = ""; },
-  pubfocus(d) { closeSheet(); if (MAP) MAP.closePopup(); const el = document.getElementById("pub-" + d.id) || (() => { const m = $("#morePubs"); if (m) { m.hidden = false; const b = m.nextElementSibling; if (b) b.remove(); } return document.getElementById("pub-" + d.id); })(); if (el) { el.scrollIntoView({ behavior: "smooth", block: "center" }); el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash"); } },
+  pubsort(d) { PUBSORT = d.k; PUBN = 20; const b = $("#publist"); if (b) b.innerHTML = pubListHtml(); document.querySelectorAll('[data-act="pubsort"]').forEach((x) => { const on = x.dataset.k === PUBSORT; x.classList.toggle("on", on); x.setAttribute("aria-pressed", on); }); },
+  pubmore() { PUBN += 30; const b = $("#publist"); if (b) b.innerHTML = pubListHtml(); },
+  async pubremote() {
+    const q = PUBQ.trim(); if (q.length < 2) return;
+    const j = await api(`/pubsearch?ground=${enc(PUBGROUND)}&q=${enc(q)}`);
+    const have = new Set(PUBS.map((p) => p.id)); let added = 0; for (const p of j.pubs) if (!have.has(p.id)) { PUBS.push(p); added++; }
+    const b = $("#publist"); if (b) b.innerHTML = pubListHtml();
+    toast(j.pubs.length ? `Found ${j.pubs.length} pub${j.pubs.length === 1 ? "" : "s"}${added ? `, ${added} new` : ""}.` : `No pubs called “${q}” found.`);
+  },
+  pubfocus(d) {
+    closeSheet(); if (MAP) MAP.closePopup();
+    if (!document.getElementById("pub-" + d.id)) { PUBQ = ""; const i = sortedPubs().findIndex((p) => p.id === d.id); if (i >= 0) PUBN = Math.max(PUBN, i + 5); const b = $("#publist"); if (b) b.innerHTML = pubListHtml(); const q = $("#pubq"); if (q) q.value = ""; }
+    const el = document.getElementById("pub-" + d.id); if (el) { el.scrollIntoView({ behavior: "smooth", block: "center" }); el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash"); }
+  },
+  pubfocusOld(d) { closeSheet(); if (MAP) MAP.closePopup(); const el = document.getElementById("pub-" + d.id) || (() => { const m = $("#morePubs"); if (m) { m.hidden = false; const b = m.nextElementSibling; if (b) b.remove(); } return document.getElementById("pub-" + d.id); })(); if (el) { el.scrollIntoView({ behavior: "smooth", block: "center" }); el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash"); } },
   morepubs(d, el) { const m = $("#morePubs"); if (m) m.hidden = false; el.remove(); },
   async droppin(d) {
     if (needJoin()) return;
@@ -1153,6 +1245,7 @@ function confirmInSheet(d) {
 const curPubs = () => (location.hash.startsWith("#/g/") ? (GD && GD.pubs) || [] : (FD && FD.pubs) || []);
 function swapPub(p) {
   const L = curPubs(); const i = L.findIndex((x) => x.id === p.id); if (i >= 0) L[i] = p;
+  const box = $("#publist"); if (box && !/\/hub$|^#?\/?$/.test(location.hash)) { box.innerHTML = pubListHtml(); return; }
   reDraw();
 }
 function reDraw() {
@@ -1164,9 +1257,9 @@ function reDraw() {
 function reload() {
   const [a, b, c] = location.hash.replace(/^#\/?/, "").split("/");
   const y = window.scrollY;
-  if (a === "f") pFixture(decodeURIComponent(b), c || "hub").then(() => window.scrollTo(0, y));
-  else if ((a === "" || !a) && FD && HUBHOME) pFixture(FD.fixture.id, "hub", true).then(() => window.scrollTo(0, y));
-  else if (a === "g") pGround(decodeURIComponent(b)).then(() => window.scrollTo(0, y));
+  if (a === "f") pFixture(decodeURIComponent(b), c || "hub", false, true).then(() => window.scrollTo(0, y));
+  else if ((a === "" || !a) && FD && HUBHOME) pFixture(FD.fixture.id, "hub", true, true).then(() => window.scrollTo(0, y));
+  else if (a === "g") { PC.delete("/g/" + decodeURIComponent(b)); pGround(decodeURIComponent(b)).then(() => window.scrollTo(0, y)); }
   else route();
 }
 
@@ -1180,8 +1273,23 @@ const FORM = {
     AUTH = `${j.id}.${j.key}`; LS.set("alawAuth", AUTH); LS.set("alawSaveCode", "1");
     await refreshBoot(); closeSheet(); toast(`Welcome, ${j.nick}. Marching on together.`); reload();
   },
-  async quicklift(v) { await api("/lift", { ...v, share: !!v.share }); closeSheet(); toast(v.kind === "need" ? "Posted. Drivers can message you." : "Seats offered. Legend."); reload(); },
-  async quickticket(v) { await api("/ticket", { ...v, official: !!v.official }); closeSheet(); toast("Posted."); reload(); },
+  async quicklift(v) {
+    if (v.kind !== "need" && !v.share) throw new Error("Tick the box to confirm it's petrol money only.");
+    await api("/lift", { ...v, share: !!v.share }); closeSheet(); toast(v.kind === "need" ? "Posted. Drivers can message you or reply." : "Seats offered. Fans can message you or reply."); reload();
+  },
+  async quickticket(v) {
+    if (!v.official) throw new Error("Tick the box to confirm it goes through the club's official ticket transfer.");
+    await api("/ticket", { ...v, official: true }); closeSheet(); toast(v.kind === "wanted" ? "Posted. Fans with a spare can message you." : "Posted. Fans can message you or reply."); reload();
+  },
+  async reply(v, form) {
+    if (needJoin()) return;
+    const t = String(v.text || "").trim(); if (!t) throw new Error("Write a reply first.");
+    const j = await api("/comment", { pid: v.pid, type: v.type, text: t });
+    form.reset(); const list = form.parentElement.querySelector(".rlist");
+    if (list) list.insertAdjacentHTML("beforeend", `<div class="small" style="line-height:1.4"><b>${esc(j.comment.nick)}</b> <span class="soft">${esc(j.comment.text)}</span></div>`);
+    if (FD) { const it = FD.stream.find((x) => x.id === v.pid); if (it) { it.lastComments = [...(it.lastComments || []), j.comment].slice(-3); it.comments = (it.comments || 0) + 1; } }
+    toast("Reply posted. They'll get a notification.");
+  },
   async predict(v) { const j = await api("/predict", { fid: v.fid, h: +v.h, a: +v.a }); closeSheet(); FD.preds = j.preds; toast("Locked in. Good luck!"); reload(); },
   async newpost(v, form) {
     if (needJoin()) return;
@@ -1260,7 +1368,14 @@ document.addEventListener("submit", async (e) => {
   const btn = form.querySelector("button:not([type=button])"); if (btn) { if (btn.disabled) return; btn.disabled = true; }
   try { await fn(v, form); } catch (er) { toast(er.message); } finally { if (btn && document.body.contains(btn)) btn.disabled = false; }
 });
+let PQT = null;
+document.addEventListener("input", (e) => {
+  if (e.target.id !== "pubq") return;
+  PUBQ = e.target.value; PUBN = 20; clearTimeout(PQT);
+  PQT = setTimeout(() => { const b = $("#publist"); if (b) b.innerHTML = pubListHtml(); }, 120);
+});
 document.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && e.target.id === "pubq") { e.preventDefault(); if (!sortedPubs().length && PUBQ.trim().length >= 2) ACT.pubremote().catch((er) => toast(er.message)); return; }
   if (e.key === "Enter" && !e.shiftKey && e.target.matches(".compose textarea")) { e.preventDefault(); e.target.form.requestSubmit(); }
   if (e.key === "Escape") closeSheet();
 });

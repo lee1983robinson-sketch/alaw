@@ -160,6 +160,10 @@ nav.bar a .dot{top:4px;right:calc(50% - 16px)}
 .stepper{display:flex;align-items:center;gap:12px}.stepper .ibtn{width:52px;height:52px;border-radius:26px;font-size:26px;font-weight:700;background:var(--card2)}
 .stepper output{font-family:var(--head);font-size:46px;font-weight:800;width:44px;text-align:center;color:var(--yellow)}
 .gobtns .row>.btn{flex:1}
+.sk{border-radius:16px;background:linear-gradient(90deg,var(--card) 0%,var(--card2) 50%,var(--card) 100%);background-size:200% 100%;animation:sh 1.3s linear infinite}
+@keyframes sh{0%{background-position:100% 0}100%{background-position:-100% 0}}
+.mk.pub.sm{background:var(--blue2);border-width:2px;box-shadow:none;opacity:.85}
+@media (prefers-reduced-motion:reduce){.sk{animation:none}}
 .fab{position:fixed;right:16px;bottom:calc(90px + env(safe-area-inset-bottom));z-index:15;background:var(--yellow);color:#0B1426!important;font-weight:800;border-radius:26px;padding:0 18px;height:50px;display:flex;align-items:center;gap:8px;box-shadow:0 8px 22px rgba(0,0,0,.5)}
 @media (min-width:900px){.fab{right:calc(50% - 264px)}}
 .code{font-family:ui-monospace,Menlo,monospace;background:var(--bg2);border:1px solid var(--line2);border-radius:10px;padding:10px;word-break:break-all;font-size:14px}
