@@ -123,6 +123,30 @@ nav.bar a .dot{top:4px;right:calc(50% - 16px)}
 .pill button{height:40px;border-radius:18px;border:0;background:transparent;font-weight:600}
 .pill button.on{background:var(--text);color:var(--bg);font-weight:700}
 .score{font-family:var(--head);font-weight:800;font-size:24px;color:var(--yellow)}
+.map{height:320px;border-radius:16px;overflow:hidden;border:1px solid var(--line);background:#0e1626;z-index:0}
+.mk{width:100%;height:100%;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;border:2px solid #0B1426;box-shadow:0 2px 8px rgba(0,0,0,.55);font-family:var(--body)}
+.mk.ground{background:#fff;color:#0B1426}.mk.pub{background:var(--blue2);color:#fff}.mk.hot{background:var(--yellow);color:#0B1426;animation:pop 1.6s infinite}
+.mk.station{background:#7BD88F;color:#0B1426}.mk.park{background:#C9A7FF;color:#0B1426;border-radius:8px}.mk.meet{background:#FF8F80;color:#0B1426}
+@keyframes pop{50%{box-shadow:0 0 0 7px rgba(255,205,0,.25)}}
+.lg{display:inline-block;width:10px;height:10px;border-radius:5px;margin-right:2px}
+.leaflet-popup-content-wrapper,.leaflet-popup-tip{background:var(--card)!important;color:var(--text)!important;border-radius:12px!important}
+.leaflet-popup-content{font-family:var(--body);font-size:14px;line-height:1.45}
+.leaflet-container a.leaflet-popup-close-button{color:var(--muted)}
+.leaflet-container a{color:var(--yellow)}
+.leaflet-control-attribution{background:rgba(11,20,38,.85)!important;color:var(--muted)!important}
+.leaflet-control-attribution a{color:var(--soft)!important}
+.leaflet-bar a{background:var(--card)!important;color:var(--text)!important;border-color:var(--line)!important}
+.post .pimg{display:block;margin:0 -14px;width:calc(100% + 28px)}
+.post .pimg img{width:100%;max-height:540px;object-fit:cover}
+.ptext{line-height:1.5;white-space:pre-wrap;word-wrap:break-word;font-size:15.5px}
+.live{background:linear-gradient(180deg,#3A1220,#1A1328);border-color:#6B2A3A}
+.pulse{display:inline-block;width:8px;height:8px;border-radius:4px;background:#FF5A5A;animation:pl 1.2s infinite;vertical-align:1px}
+@keyframes pl{50%{opacity:.25}}
+.flash{animation:fl 1.8s}
+@keyframes fl{0%{box-shadow:0 0 0 3px var(--yellow)}100%{box-shadow:0 0 0 0 transparent}}
+.btn:active,.chip:active,.ibtn:active{transform:scale(.96)}
+.card{transition:border-color .2s}
+@media (prefers-reduced-motion:reduce){.pulse,.flash,.mk.hot{animation:none}}
 .code{font-family:ui-monospace,Menlo,monospace;background:var(--bg2);border:1px solid var(--line2);border-radius:10px;padding:10px;word-break:break-all;font-size:14px}
 @media (min-width:900px){ .wrap{padding-top:28px} nav.bar{left:50%;transform:translateX(-50%);max-width:560px;border:1px solid var(--line);border-bottom:0;border-radius:18px 18px 0 0} }
 </style>

@@ -21,3 +21,7 @@ Never put keys in this repo.
 - Anything reported by 3 different fans is hidden automatically.
 - Admin can hide, delete or dismiss reported items, and ban users.
 - Users can block each other.
+
+## Map data
+
+Pubs, stations and car parks near each ground come from OpenStreetMap, through the free Nominatim and Overpass services. Each ground is looked up once and cached for 30 days. The map tiles are © OpenStreetMap contributors and © CARTO. If a ground lands in the wrong place, fix it in Admin under "Ground location".
