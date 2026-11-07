@@ -337,7 +337,7 @@ async function api(req, res, url) {
     const f = FX.byId(m[1]); if (!f) return send(res, 404, { error: "Fixture not found." });
     const gi = groundsList().find((g) => g.key === f.ground);
     // never keep fans waiting: use what we have, fetch the rest in the background
-    if (gi && !(GEO.cached(f.ground) && GEO.cached(f.ground).pubs.length)) GEO.nearby(gi).catch(() => null);
+    if (gi && !GEO.fresh(f.ground)) GEO.nearby(gi).catch(() => null);
     const quick = (pr, fb, ms = 1200) => Promise.race([pr.catch(() => fb), new Promise((r) => setTimeout(() => r(fb), ms))]);
     const lu = store.get("meta", "lu:" + f.id), ij = store.get("meta", "inj:" + f.id);
     const [sq, inj, lv] = await Promise.all([quick(FX.squad(f), lu || null), quick(LIVE.injuries(f), ij ? ij.list : null), quick(LIVE.live(f), null, 2500)]);
@@ -444,7 +444,7 @@ async function api(req, res, url) {
   if (p === "/api/grounds") return send(res, 200, { grounds: groundsList() });
   if ((m = p.match(/^\/api\/g\/([\w-]+)$/))) {
     const g = groundsList().find((x) => x.key === m[1]); if (!g) return send(res, 404, { error: "Ground not found." });
-    if (!(GEO.cached(g.key) && GEO.cached(g.key).pubs.length)) await Promise.race([GEO.nearby(g), new Promise((r) => setTimeout(r, 2500))]).catch(() => null);
+    if (!GEO.fresh(g.key)) await Promise.race([GEO.nearby(g), new Promise((r) => setTimeout(r, 2500))]).catch(() => null);
     const meets = g.next ? store.all("meets").filter((x) => x.fid === g.next.id && vis(x) && meetLive(x) && x.lat != null).map((x) => meetOut(x, me)) : [];
     return send(res, 200, { ground: { ...g, center: (GEO.cached(g.key) || {}).center || null }, pubs: pubsFor(g.key, me), map: mapFor(g.key), meets, tagList: TAGS });
   }
@@ -723,7 +723,7 @@ console.log(`[boot] ALAW ${VERSION} starting on Node ${process.version}`);
 let bootT; Promise.race([store.init().finally(() => clearTimeout(bootT)), new Promise((r) => { bootT = setTimeout(() => { console.warn("[boot] storage slow to answer, starting anyway"); r(); }, 25000); })]).catch((e) => console.error("[boot] storage error:", e.message)).then(() => {
   FX.refresh(true);
   setInterval(() => FX.refresh(), 30 * 60e3).unref();
-  const warm = async () => { for (const g of groundsList().filter((x) => x.next).slice(0, 8)) { if (!(GEO.cached(g.key) && GEO.cached(g.key).pubs.length)) await GEO.nearby(g).catch(() => null); } };
+  const warm = async () => { for (const g of groundsList().filter((x) => x.next).slice(0, 8)) { if (!GEO.fresh(g.key)) await GEO.nearby(g).catch(() => null); } };
   setTimeout(warm, 8e3); setInterval(warm, 15 * 60e3).unref();
   setInterval(() => { const t = now(); for (const c of store.all("checkins")) if (c.at < t - CHECK_MS) store.del("checkins", `${c.pid}:${c.uid}`); }, 30 * 60e3).unref();
   server.listen(PORT, () => console.log(`ALAW ${VERSION} on port ${PORT} (store: ${store.status().mode}, fixtures key: ${FX.status().hasKey ? "yes" : "no"})`));
