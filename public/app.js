@@ -133,7 +133,7 @@ async function boot() {
   const saved = LSJ.get("alawBoot");
   if (saved && saved.fixtures) { BOOT = saved; ME = AUTH ? saved.me : null; route(); }
   else APP.innerHTML = skeleton(true);
-  try { BOOT = await api("/boot"); ME = BOOT.me; LSJ.set("alawBoot", BOOT); }
+  try { BOOT = await api("/boot"); ME = BOOT.me; LSJ.set("alawBoot", BOOT); if (AUTH && !ME) { AUTH = null; LS.set("alawAuth", null); route(); } }
   catch (e) { if (!saved) APP.innerHTML = `<div class="empty">Couldn't reach ALAW. ${esc(e.message)}<br><br><button class="btn y" onclick="location.reload()">Try again</button></div>`; return; }
   if (saved) { checkInbox(); setInterval(checkInbox, 60e3); nav(curNav); return; }
   if (AUTH && !ME) { /* key no longer valid */ }
@@ -152,8 +152,10 @@ function route() {
   const parts = location.hash.replace(/^#\/?/, "").split("/").map(decodeURIComponent);
   const [a, b, c] = parts;
   curNav = { "": "", games: "games", aways: "games", f: "games", clubs: "", lost: "", pubs: "pubs", g: "pubs", inbox: "inbox", dm: "inbox", me: "me", u: "", lounge: "", admin: "me", rules: "me", photos: "photos", notes: "", p: "feed", feed: "feed", league: "" }[a] ?? "";
-  nav(curNav);
   window.scrollTo(0, 0);
+  if (!ME && a !== "rules") { NAV.hidden = true; return drawJoin(); }
+  NAV.hidden = false;
+  nav(curNav);
   const R = { "": pHub, feed: pHome, league: pLeague, games: pAways, aways: pAways, clubs: pClubs, lost: pLost, f: pFixture, pubs: pPubs, g: pGround, inbox: pInbox, dm: pDM, me: pMe, u: pUser, lounge: pLounge, rules: pRules, admin: pAdmin, photos: pGallery, notes: pNotes, p: pPost };
   (R[a] || pHome)(b, c);
 }
@@ -834,19 +836,27 @@ async function pMe() {
   APP.innerHTML = profileHtml(j.me, j.stats, true);
 }
 function drawJoin() {
-  APP.innerHTML = `<div class="col" style="gap:18px">
-    <div class="mark">ALAW<small>All Leeds Aren't We</small></div>
-    <h1 class="h1">Join the<br><span class="y">Leeds end</span></h1>
-    <p class="soft" style="margin:0;line-height:1.5">Every Leeds matchday, home and away. Pick a nickname. No email, no phone number, no password to remember. You'll get a recovery code to keep you logged in on other phones.</p>
-    <form data-form="join" class="col">
-      <div><label class="l" for="jn">Nickname</label><input class="f" id="jn" name="nick" minlength="3" maxlength="20" autocomplete="nickname" placeholder="e.g. TomLUFC" required></div>
-      <div><label class="l" for="jf">Where you travel from (optional)</label><input class="f" id="jf" name="from" maxlength="30" placeholder="Wakefield"></div>
-      <label class="check"><input type="checkbox" name="rules" required> I'm 18 or over and I'll stick to the <a href="#/rules">house rules</a>.</label>
-      <button class="btn y big">Join ALAW</button>
+  const nx = (BOOT.fixtures || []).find((f) => f.ts > NOW() - 3 * H);
+  const feats = [["car", "Lifts", "Need a lift or got a spare seat"], ["ticket", "Spare tickets", "Find one, pass one on, the official way"], ["pint", "Pubs", "Where the Leeds are drinking right now"], ["pin", "Meet-ups", "Find your lot, drop a pin, walk there"], ["medal", "Predictions", "Call the score, top the league"], ["cam", "Photos & banter", "The away end, the pub, the train"]];
+  APP.innerHTML = `<div class="col" style="gap:20px;padding-bottom:20px">
+    <section class="landing col" style="gap:14px">
+      <div class="mark" style="font-size:44px">ALAW<small>All Leeds Aren't We</small></div>
+      <h1 class="h1" style="font-size:46px">Every Leeds<br>matchday.<br><span class="y">One place.</span></h1>
+      <p class="soft" style="margin:0;line-height:1.5">Home or away, at the ground or in the pub. Sort lifts, tickets and meet-ups with Leeds fans going to the same game.</p>
+      ${nx ? `<div class="board row" style="gap:10px;border-radius:14px">${ic("cal", 18, 'style="color:var(--yellow)"')}<span class="grow">Next: ${nx.isAway ? "at " + esc(short(nx.home.name)) : "v " + esc(short(nx.away.name))} · ${fmtDay(nx.ts)}</span>${(nx.going || 0) + (nx.watching || 0) ? `<span class="y" style="font-weight:700">${(nx.going || 0) + (nx.watching || 0)} in</span>` : ""}</div>` : ""}
+    </section>
+    <div class="feats">${feats.map(([i, t, d]) => `<div class="feat">${ic(i, 22, 'style="color:var(--yellow);flex-shrink:0"')}<div><b>${t}</b><span class="tiny muted">${d}</span></div></div>`).join("")}</div>
+    <form data-form="join" class="card col" style="gap:12px">
+      <h2 class="h2" style="font-size:24px">Get in</h2>
+      <div><label class="l" for="jn">Pick a nickname</label><input class="f" id="jn" name="nick" minlength="3" maxlength="20" autocomplete="nickname" placeholder="e.g. TomLUFC" required></div>
+      <label class="check"><input type="checkbox" name="rules"> I'm 18 or over and I'll stick to the <a href="#/rules">house rules</a>.</label>
+      <button class="btn y big">Join ALAW · free</button>
+      <span class="tiny muted">No email, no phone number, no password. ${BOOT.fans ? `${BOOT.fans} Leeds fan${BOOT.fans === 1 ? "" : "s"} already in.` : ""}</span>
     </form>
     <details class="card"><summary style="cursor:pointer;font-weight:600;min-height:28px">Already joined on another phone?</summary>
-      <form data-form="login" class="col" style="margin-top:12px"><label class="l" for="rc">Paste your recovery code</label><input class="f" id="rc" name="code" autocomplete="off" required><button class="btn y">Log in</button></form>
+      <form data-form="login" class="col" style="margin-top:12px"><label class="l" for="rc">Paste your recovery code (from Me on your other phone)</label><input class="f" id="rc" name="code" autocomplete="off" required><button class="btn y">Log in</button></form>
     </details>
+    <p class="note" style="text-align:center">An independent fan site, not connected to Leeds United FC.</p>
   </div>`;
 }
 function profileHtml(u, s, own) {
@@ -1245,7 +1255,7 @@ const ACT = {
   logout() {
     sheet(`<h2 class="h2" style="font-size:20px">Log out?</h2><p class="note">Make sure you've saved your recovery code first, or you won't be able to get back into this account.</p><button class="btn y" data-act="logoutyes">Log out</button><button class="btn" data-act="close-sheet">Cancel</button>`);
   },
-  async logoutyes() { AUTH = null; LS.set("alawAuth", null); ME = null; closeSheet(); await refreshBoot(); location.hash = "#/"; route(); },
+  async logoutyes() { AUTH = null; LS.set("alawAuth", null); LS.set("alawHub", null); ME = null; FCACHE.clear(); PC.clear(); closeSheet(); await refreshBoot(); route(); },
   async adm(d) { await api("/admin/act", { type: d.type, id: d.id, action: d.a, uid: d.uid }); toast("Done."); pAdmin(); },
   async admrefresh() { const j = await api("/admin/refresh", {}); toast(j.fixtures.error || `${j.fixtures.count} fixtures`); await refreshBoot(); pAdmin(); },
   async admrmfix(d) { await api("/admin/fixture", { remove: d.id }); await refreshBoot(); pAdmin(); },
@@ -1338,16 +1348,15 @@ const FORM = {
   async admground(v) { const j = await api("/admin/ground", v); toast(`Saved. Found ${j.pubs} pubs.`); pAdmin(); },
   async admpoll(v) { await api("/admin/poll", { q: v.q, options: String(v.options || "").split("\n") }); toast("Poll live."); pAdmin(); },
   async join(v) {
-    const j = await api("/me/create", { nick: v.nick, from: v.from, rules: !!v.rules });
-    AUTH = `${j.id}.${j.key}`; LS.set("alawAuth", AUTH);
-    await refreshBoot();
-    sheet(`<h2 class="h2">Welcome, ${esc(j.nick)}</h2><p class="soft" style="margin:0;line-height:1.5">This is your recovery code. It's your login: save it in your notes or take a screenshot. You'll need it to log in on another phone.</p>
-      <div class="code">${esc(AUTH)}</div><button class="btn" data-act="copycode">Copy code</button>
-      <a class="btn y big" href="#/" onclick="document.getElementById('sheet').remove()">I've saved it, take me in</a>`);
+    if (!v.rules) throw new Error("Tick the box to confirm you're 18+ and happy with the house rules.");
+    const j = await api("/me/create", { nick: v.nick, from: v.from, rules: true });
+    AUTH = `${j.id}.${j.key}`; LS.set("alawAuth", AUTH); LS.set("alawSaveCode", "1");
+    await refreshBoot(); checkInbox(); toast(`You're in, ${j.nick}. Marching on together.`);
+    route();
   },
   async login(v) {
     const code = String(v.code || "").trim(); const old = AUTH; AUTH = code;
-    try { await api("/me"); LS.set("alawAuth", code); await refreshBoot(); toast("Welcome back."); location.hash = "#/"; }
+    try { await api("/me"); LS.set("alawAuth", code); await refreshBoot(); toast("Welcome back."); route(); }
     catch (e) { AUTH = old; throw new Error("That code didn't work. Check you copied all of it."); }
   },
   async chat(v, form) {
